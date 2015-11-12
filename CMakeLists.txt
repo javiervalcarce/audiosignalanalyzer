@@ -34,7 +34,7 @@ add_library(thdanalyzer SHARED ${libthdanalyzer_SRCS})
 set_target_properties(thdanalyzer PROPERTIES VERSION ${LIBTHDANALYZER_VERSION_STRING})
 
 add_executable(test_thd_analyzer ${test_thd_analyzer_SRCS})
-target_link_libraries(test_thd_analyzer thdanalyzer pthread)
+target_link_libraries(test_thd_analyzer thdanalyzer asound m pthread)
 
 
 

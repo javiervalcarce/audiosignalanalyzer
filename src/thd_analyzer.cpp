@@ -26,7 +26,7 @@ int ThdAnalyzer::Init() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int ThdAnalyzer::Start() {
-/*
+
       // Ejemplo
       int i;
       int err;
@@ -65,7 +65,8 @@ int ThdAnalyzer::Start() {
             exit (1);
       }
 	
-      if ((err = snd_pcm_hw_params_set_rate_near (capture_handle, hw_params, 44100, 0)) < 0) {
+      unsigned int samplerate = 44100;
+      if ((err = snd_pcm_hw_params_set_rate_near (capture_handle, hw_params, &samplerate, NULL)) < 0) {
             fprintf (stderr, "cannot set sample rate (%s)\n",
                      snd_strerror (err));
             exit (1);
@@ -101,7 +102,7 @@ int ThdAnalyzer::Start() {
 	
       snd_pcm_close (capture_handle);
       exit (0);
-*/
+
       return 0;
 }
 
