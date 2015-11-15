@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 #include <string>
+#include <pthread.h>
+
 
 namespace thd_analyzer {
 
@@ -90,12 +92,25 @@ namespace thd_analyzer {
             };
 
 
+            pthread_t thread_;
+            pthread_attr_t thread_attr_;
 
             // Indica si el objeto se ha inicializado mediante Init()
             bool initialized_;
+            bool run_;
 
             // XYZ
             std::string device_;
+
+            snd_pcm_t *playback_handle;
+            short buf[4096];
+
+            int playback_callback (snd_pcm_sframes_t nframes);
+
+            static void* ThreadFuncHelper(void* p);
+            void* ThreadFunc();
+            
+
       
       };
 
