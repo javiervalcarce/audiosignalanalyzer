@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <string>
+#include <unistd.h>
 #include <getopt.h>
 
 #include "waveform_generator.h"
@@ -28,12 +29,6 @@ void Usage();
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char** argv) {
-
-      // Lectura de las opciones en la línea de órdenes
-      if (argc == 1) {
-            Usage();
-            return 0;
-      }
 
       // hw0,2
       device_ = "default";
@@ -74,6 +69,8 @@ int main(int argc, char** argv) {
             return 1;
       } 
 
+      printf("Playing...\n");
+      sleep(4);
       printf("\n");
       return 0;
 }

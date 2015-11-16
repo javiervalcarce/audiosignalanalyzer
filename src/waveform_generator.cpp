@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <alsa/asoundlib.h>
+#include <cmath>
 
 #include "waveform_generator.h"
 
@@ -15,9 +16,20 @@ using namespace thd_analyzer;
 int WaveformGenerator::playback_callback (snd_pcm_sframes_t nframes) {
       int err;
       
-      printf ("playback callback called with %ull frames\n", nframes);
+      //printf ("playback callback called with %ull frames\n", nframes);
       
       /* ... fill buf with data ... */
+
+      static int n = 0;
+      int i;
+      short s;
+      for (i = 0; i < nframes; i++) {
+            s = (short) (32000 * sin(0.3*n));
+            n++;
+            buf[2 * i + 0] = s;
+            buf[2 * i + 1] = s;
+            //printf("%d ", s);
+      }
       
       if ((err = snd_pcm_writei (playback_handle, buf, nframes)) < 0) {
             fprintf (stderr, "write failed (%s)\n", snd_strerror (err));
