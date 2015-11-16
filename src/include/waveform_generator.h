@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <string>
 #include <pthread.h>
-
+#include <alsa/asoundlib.h>
 
 namespace thd_analyzer {
 
@@ -91,13 +91,16 @@ namespace thd_analyzer {
                   double* data;
             };
 
-
+            
             pthread_t thread_;
             pthread_attr_t thread_attr_;
 
             // Indica si el objeto se ha inicializado mediante Init()
             bool initialized_;
             bool run_;
+
+            double frequency_;
+            double amplitude_;
 
             // XYZ
             std::string device_;

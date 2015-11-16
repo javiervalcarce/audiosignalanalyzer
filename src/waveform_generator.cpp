@@ -15,7 +15,7 @@ using namespace thd_analyzer;
 int WaveformGenerator::playback_callback (snd_pcm_sframes_t nframes) {
       int err;
       
-      printf ("playback callback called with %u frames\n", nframes);
+      printf ("playback callback called with %ull frames\n", nframes);
       
       /* ... fill buf with data ... */
       
@@ -35,7 +35,7 @@ WaveformGenerator::WaveformGenerator(const char* playback_pcm_device) {
       initialized_ = false;
       run_ = false;
 
-      pthread_attr_init(&pthread_attr_);
+      pthread_attr_init(&thread_attr_);
 
 }
 
@@ -74,13 +74,13 @@ int WaveformGenerator::Stop() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WaveformGenerator::SetFrequency(double frequency) {
-      return 0.0;
+      frequency_ = frequency;
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WaveformGenerator::SetAmplitude(double amplitude) {
-      return 0.0;
+      amplitude_ = amplitude;
 }
 
 
@@ -90,7 +90,7 @@ void* WaveformGenerator::ThreadFuncHelper(void* p) {
       return o->ThreadFunc();
 }
 
-void* WaveformGenerator::ThreadFunc(void* p) {
+void* WaveformGenerator::ThreadFunc() {
 
       snd_pcm_hw_params_t *hw_params;
       snd_pcm_sw_params_t *sw_params;
@@ -99,9 +99,9 @@ void* WaveformGenerator::ThreadFunc(void* p) {
       int err;
       struct pollfd *pfds;
       
-      if ((err = snd_pcm_open (&playback_handle, argv[1], SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+      if ((err = snd_pcm_open (&playback_handle, device_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
             fprintf (stderr, "cannot open audio device %s (%s)\n", 
-                     argv[1],
+                     device_.c_str(),
                      snd_strerror (err));
             exit (1);
       }
@@ -130,7 +130,8 @@ void* WaveformGenerator::ThreadFunc(void* p) {
             exit (1);
       }
       
-      if ((err = snd_pcm_hw_params_set_rate_near (playback_handle, hw_params, 44100, 0)) < 0) {
+      unsigned int sample_rate = 44100;
+      if ((err = snd_pcm_hw_params_set_rate_near (playback_handle, hw_params, &sample_rate, NULL)) < 0) {
             fprintf (stderr, "cannot set sample rate (%s)\n",
                      snd_strerror (err));
             exit (1);

@@ -4,7 +4,8 @@
 #include <cstdlib>
 #include <string>
 #include <getopt.h>
-#include "thd_analyzer.h"
+
+#include "waveform_generator.h"
 
 using namespace thd_analyzer;
 
@@ -18,11 +19,10 @@ struct option long_options[] = {
 };
 
 std::string device_;
-ThdAnalyzer* driver = NULL;
+WaveformGenerator* obj = NULL;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void MilliSleep(int milliseconds);
 void Usage();
 
 
@@ -68,8 +68,8 @@ int main(int argc, char** argv) {
       char* endptr;
       int address;
 
-      driver = new WaveformGenerator(device_.c_str()); 
-      if (driver->Init() != 0) {
+      obj = new WaveformGenerator(device_.c_str()); 
+      if (obj->Init() != 0) {
             printf("Error: During ALSA device initialization.\n");
             return 1;
       } 
@@ -79,18 +79,9 @@ int main(int argc, char** argv) {
 }
 
 
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void MilliSleep(int milliseconds) {
-      struct timespec t0;
-      t0.tv_sec  = (milliseconds / 1000);
-      t0.tv_nsec = (milliseconds % 1000) * 1000000; // ns
-      nanosleep(&t0, NULL);
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void Usage() {
-      printf("Usage: ./test_thd_analyzer <alsa-capture-device-name>\n");
-      printf("Defaults to L channel\n");
+      printf("Usage: ./test_waveform_generator <alsa-playback-device-name>\n");
+      printf("Defaults to L and R channels\n");
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
