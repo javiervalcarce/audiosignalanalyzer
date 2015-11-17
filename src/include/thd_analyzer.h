@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <alsa/asoundlib.h>
 
 namespace thd_analyzer {
 
@@ -49,16 +50,19 @@ namespace thd_analyzer {
             /**
              * Frecuencia cuyo coeficiente en la transformada tiene módulo máximo, expresado en Hz.
              *
+             * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
              */
-            double Frequency();
+            double Frequency(int channel);
 
             /**
-             * Amplitud máxima del pedazo de señal, normalizada entre 0.0 y 1.0, para convertir esto en voltios hay que saber
-             * el rango dinámico de entrada del conversor A/D.
+             * Amplitud máxima del pedazo de señal, normalizada entre 0.0 y 1.0, para convertir esto en voltios hay que
+             * saber el rango dinámico de entrada del conversor A/D.
              *
+             * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
              */
-            double Amplitude();
+            double Amplitude(int channel);
 
+            int Count() { return fft_count_; }
 
       private:
 
@@ -99,12 +103,29 @@ namespace thd_analyzer {
 
             // Indica si el objeto se ha inicializado mediante Init()
             bool initialized_;
-
-            // 
+            bool exit_thread_;
+            // Dispositivo ALSA de captura
             std::string device_;
-            snd_pcm_t *playback_handle;
-            short buf[4096];
-            
+
+            // Representa el dispositivo ALSA de captura de audio.
+            snd_pcm_t* capture_handle_;
+
+            // Búfer en el se reciben las muestras en el formato en que las entrega el ADC, que normalmente será int16_t
+            // las muestras podrán pertenecer a un solo canal o a varios intercalados. Si por ejemplo hay dos canales
+            // (estereo) entonces las muestras estarán dispuestas de la forma L R L R L R L R L R...)
+            short buf_[4096];
+            int   buf_size_;
+            int fft_count_;
+
+            // Muestras correspondientes al canal L y R convertidas a coma flotante y normalizadas en el intevalo real
+            // [-1.0, 1.0)
+            double channel_data_[2][2048];
+            int    channel_size_[2];
+          
+            // Medidas realizadas sobre las señales L y R
+            double channel_frequency_[2];
+            double channel_amplitude_[2];
+
             static void* ThreadFuncHelper(void* p);
             void* ThreadFunc();
             
@@ -116,8 +137,10 @@ namespace thd_analyzer {
              */
             void FFT(short int dir, long m, double* x, double* y);
 
-            int process_callback (snd_pcm_sframes_t nframes);
-
+            /**
+             *
+             */
+            int Process();
       
       };
 

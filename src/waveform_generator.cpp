@@ -13,7 +13,7 @@ using namespace thd_analyzer;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int WaveformGenerator::playback_callback (snd_pcm_sframes_t nframes) {
+int WaveformGenerator::playback_callback(snd_pcm_sframes_t nframes) {
       int err;
       
       //printf ("playback callback called with %ull frames\n", nframes);
@@ -23,15 +23,19 @@ int WaveformGenerator::playback_callback (snd_pcm_sframes_t nframes) {
       static int n = 0;
       int i;
       short s;
+
+      // Frecuencia discreta = 
+      double w = 2 * M_PI * frequency_ / 22050.0;
+
       for (i = 0; i < nframes; i++) {
-            s = (short) (32000 * sin(0.3*n));
+            s = (short) (32767 * amplitude_ * cos(w*n));
             n++;
             buf[2 * i + 0] = s;
             buf[2 * i + 1] = s;
             //printf("%d ", s);
       }
       
-      if ((err = snd_pcm_writei (playback_handle, buf, nframes)) < 0) {
+      if ((err = snd_pcm_writei(playback_handle_, buf, nframes)) < 0) {
             fprintf (stderr, "write failed (%s)\n", snd_strerror (err));
       }
       
@@ -48,7 +52,8 @@ WaveformGenerator::WaveformGenerator(const char* playback_pcm_device) {
       run_ = false;
 
       pthread_attr_init(&thread_attr_);
-
+      frequency_ = 440;
+      amplitude_ = 1.0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -61,6 +66,12 @@ WaveformGenerator::~WaveformGenerator() {
 int WaveformGenerator::Init() {
 
       assert(initialized_ == false);
+      int err;
+
+      
+
+      
+
 
       int r;
       r = pthread_create(&thread_, &thread_attr_, WaveformGenerator::ThreadFuncHelper, this);
@@ -72,7 +83,7 @@ int WaveformGenerator::Init() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int WaveformGenerator::Start() {
-
+      run_ = true;
       // Ejemplo
       return 0;
 }
@@ -80,6 +91,7 @@ int WaveformGenerator::Start() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int WaveformGenerator::Stop() {
+      run_ = false;
       return 0;
 }
 
@@ -104,104 +116,99 @@ void* WaveformGenerator::ThreadFuncHelper(void* p) {
 
 void* WaveformGenerator::ThreadFunc() {
 
-      snd_pcm_hw_params_t *hw_params;
-      snd_pcm_sw_params_t *sw_params;
       snd_pcm_sframes_t frames_to_deliver;
-      int nfds;
       int err;
-      struct pollfd *pfds;
-      
-      if ((err = snd_pcm_open (&playback_handle, device_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
-            fprintf (stderr, "cannot open audio device %s (%s)\n", 
-                     device_.c_str(),
-                     snd_strerror (err));
-            exit (1);
+
+
+// HW Parameters
+      // ---------------------------------------------------------------------------------------------------------------
+      snd_pcm_hw_params_t *hw_params;
+      if ((err = snd_pcm_open (&playback_handle_, device_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+            fprintf (stderr, "cannot open audio device %s (%s)\n", device_.c_str(), snd_strerror (err));
+            return NULL;
       }
          
       if ((err = snd_pcm_hw_params_malloc (&hw_params)) < 0) {
             fprintf (stderr, "cannot allocate hardware parameter structure (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
        
-      if ((err = snd_pcm_hw_params_any (playback_handle, hw_params)) < 0) {
+      if ((err = snd_pcm_hw_params_any (playback_handle_, hw_params)) < 0) {
             fprintf (stderr, "cannot initialize hardware parameter structure (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
       
-      if ((err = snd_pcm_hw_params_set_access (playback_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
+      if ((err = snd_pcm_hw_params_set_access (playback_handle_, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
             fprintf (stderr, "cannot set access type (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
       
-      if ((err = snd_pcm_hw_params_set_format (playback_handle, hw_params, SND_PCM_FORMAT_S16_LE)) < 0) {
+      if ((err = snd_pcm_hw_params_set_format (playback_handle_, hw_params, SND_PCM_FORMAT_S16_LE)) < 0) {
             fprintf (stderr, "cannot set sample format (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
       
       unsigned int sample_rate = 44100;
-      if ((err = snd_pcm_hw_params_set_rate_near (playback_handle, hw_params, &sample_rate, NULL)) < 0) {
+      if ((err = snd_pcm_hw_params_set_rate_near (playback_handle_, hw_params, &sample_rate, NULL)) < 0) {
             fprintf (stderr, "cannot set sample rate (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
       
-      if ((err = snd_pcm_hw_params_set_channels (playback_handle, hw_params, 2)) < 0) {
+      if ((err = snd_pcm_hw_params_set_channels (playback_handle_, hw_params, 2)) < 0) {
             fprintf (stderr, "cannot set channel count (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
       
-      if ((err = snd_pcm_hw_params (playback_handle, hw_params)) < 0) {
+      if ((err = snd_pcm_hw_params (playback_handle_, hw_params)) < 0) {
             fprintf (stderr, "cannot set parameters (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
       
-      snd_pcm_hw_params_free (hw_params);
+      snd_pcm_hw_params_free(hw_params);
       
       /* tell ALSA to wake us up whenever 4096 or more frames
             of playback data can be delivered. Also, tell
                ALSA that we'll start the device ourselves.
       */
-      
-      if ((err = snd_pcm_sw_params_malloc (&sw_params)) < 0) {
+      // SW Parameters
+      // ---------------------------------------------------------------------------------------------------------------      
+      snd_pcm_sw_params_t *sw_params;
+
+      if ((err = snd_pcm_sw_params_malloc(&sw_params)) < 0) {
             fprintf (stderr, "cannot allocate software parameters structure (%s)\n",
                      snd_strerror (err));
-            exit (1);
+            return NULL;
       }
-      if ((err = snd_pcm_sw_params_current (playback_handle, sw_params)) < 0) {
-            fprintf (stderr, "cannot initialize software parameters structure (%s)\n",
-                     snd_strerror (err));
-            exit (1);
+      if ((err = snd_pcm_sw_params_current(playback_handle_, sw_params)) < 0) {
+            fprintf (stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(err));
+            return NULL;
       }
-      if ((err = snd_pcm_sw_params_set_avail_min (playback_handle, sw_params, 4096)) < 0) {
-            fprintf (stderr, "cannot set minimum available count (%s)\n",
-                     snd_strerror (err));
-            exit (1);
+      if ((err = snd_pcm_sw_params_set_avail_min(playback_handle_, sw_params, 4096)) < 0) {
+            fprintf (stderr, "cannot set minimum available count (%s)\n", snd_strerror(err));
+            return NULL;
       }
-      if ((err = snd_pcm_sw_params_set_start_threshold (playback_handle, sw_params, 0U)) < 0) {
-            fprintf (stderr, "cannot set start mode (%s)\n",
-                     snd_strerror (err));
-            exit (1);
+      if ((err = snd_pcm_sw_params_set_start_threshold(playback_handle_, sw_params, 0U)) < 0) {
+            fprintf (stderr, "cannot set start mode (%s)\n", snd_strerror(err));
+            return NULL;
       }
-      if ((err = snd_pcm_sw_params (playback_handle, sw_params)) < 0) {
-            fprintf (stderr, "cannot set software parameters (%s)\n",
-                     snd_strerror (err));
-            exit (1);
+      if ((err = snd_pcm_sw_params(playback_handle_, sw_params)) < 0) {
+            fprintf (stderr, "cannot set software parameters (%s)\n", snd_strerror(err));
+            return NULL;
       }
-      
-      /* the interface will interrupt the kernel every 4096 frames, and ALSA
-            will wake up this program very soon after that.
-      */
-      
-      if ((err = snd_pcm_prepare (playback_handle)) < 0) {
-            fprintf (stderr, "cannot prepare audio interface for use (%s)\n",
-                     snd_strerror (err));
-            exit (1);
+
+
+      // The interface will interrupt the kernel every 4096 frames, and ALSA will wake up this program very soon after
+      // that.
+      if ((err = snd_pcm_prepare(playback_handle_)) < 0) {
+            fprintf (stderr, "cannot prepare audio interface for use (%s)\n", snd_strerror(err));
+            return NULL;
       }
 
       while (1) {
@@ -210,14 +217,14 @@ void* WaveformGenerator::ThreadFunc() {
                   has elapsed.
             */
             
-            if ((err = snd_pcm_wait (playback_handle, 1000)) < 0) {
+            if ((err = snd_pcm_wait (playback_handle_, 1000)) < 0) {
                   fprintf (stderr, "poll failed (%s)\n", strerror (errno));
                   break;
             }           
             
             /* find out how much space is available for playback data */
             
-            if ((frames_to_deliver = snd_pcm_avail_update (playback_handle)) < 0) {
+            if ((frames_to_deliver = snd_pcm_avail_update (playback_handle_)) < 0) {
                   if (frames_to_deliver == -EPIPE) {
                         fprintf (stderr, "an xrun occured\n");
                         break;
@@ -238,7 +245,7 @@ void* WaveformGenerator::ThreadFunc() {
             }
       }
       
-      snd_pcm_close (playback_handle);
+      snd_pcm_close (playback_handle_);
 
       return NULL;
 }

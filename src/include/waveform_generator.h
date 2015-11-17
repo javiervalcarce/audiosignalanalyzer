@@ -105,7 +105,7 @@ namespace thd_analyzer {
             // XYZ
             std::string device_;
 
-            snd_pcm_t *playback_handle;
+            snd_pcm_t* playback_handle_;
             short buf[4096];
 
             int playback_callback (snd_pcm_sframes_t nframes);

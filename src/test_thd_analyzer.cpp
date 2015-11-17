@@ -19,7 +19,7 @@ using namespace thd_analyzer;
 
 // tabla de opciones para getopt_long
 struct option long_options[] = {
-      { "device",   required_argument, 0, 'a' },
+      { "device",   required_argument, 0, 'd' },
       { "help",     no_argument,       0, 'h' },   
       { 0,          0,                 0,  0  }
 };
@@ -35,12 +35,6 @@ void Usage();
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char** argv) {
-
-      // Lectura de las opciones en la línea de órdenes
-      if (argc == 1) {
-            Usage();
-            return 0;
-      }
 
       // hw0,2
       device_ = "default";
@@ -81,7 +75,16 @@ int main(int argc, char** argv) {
             return 1;
       } 
 
-      printf("\n");
+      driver->Start();
+
+      int times = 50;
+      while (times > 0) {
+            printf("Block %06d - frequency %f\n", driver->Count(), driver->Frequency(0));
+            usleep(200000); // 0,5 segundos
+            times--;
+      }
+
+      printf("FIN\n");
       return 0;
 }
 
