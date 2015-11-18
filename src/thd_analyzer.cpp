@@ -16,12 +16,16 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
       initialized_ = false;
       exit_thread_ = false;
       capture_handle_ = NULL;
+      buf_data_ = new int16_t[4096];
       buf_size_ = 0;
       fft_count_ = 0;
+
       channel_size_[0] = 0; 
       channel_size_[1] = 0;
-      channel_frequency_[0] = 0.0;
-      channel_frequency_[1] = 0.0;
+
+      channel_frequency_[0] = -1.0;
+      channel_frequency_[1] = -1.0;
+
       channel_amplitude_[0] = 0.0;
       channel_amplitude_[1] = 0.0;
 
@@ -30,6 +34,7 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ThdAnalyzer::~ThdAnalyzer() {
       exit_thread_ = true;
+      delete[] buf_data_;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -206,12 +211,13 @@ void* ThdAnalyzer::ThreadFunc() {
 
             int r;
             int frames = frames_to_deliver;
-            
+            int16_t* b = buf_data_;
+
             do {
-                  r = snd_pcm_readi(capture_handle_, (void*) buf_, frames_to_deliver);
+                  r = snd_pcm_readi(capture_handle_, b, frames);
                   
                   // 2 int16_t por frame
-                  buf_ += r * 2; 
+                  b += r * 2; 
                   frames -= r;
                   
                   if (r == 0) printf("ZERO!\n");
@@ -224,9 +230,12 @@ void* ThdAnalyzer::ThreadFunc() {
 
             // Conversión de formato: de int16_t a coma flotante 
             for (i = 0; i < frames_to_deliver; i++) {
-                  channel_data_[0][i] = ((double) buf_[2 * i + 0]) / 32678.0;
-                  channel_data_[1][i] = ((double) buf_[2 * i + 1]) / 32678.0;
+                  channel_data_[0][i] = ((double) buf_data_[2 * i + 0]) / 32678.0;
+                  channel_data_[1][i] = ((double) buf_data_[2 * i + 1]) / 32678.0;
             }
+
+            channel_size_[0] = frames_to_deliver;
+            channel_size_[1] = frames_to_deliver;
 
             // proc
             Process();
@@ -247,31 +256,30 @@ int ThdAnalyzer::Process() {
       // En channel_size[x] tenemos el número de muestras correspondientes al canal x
 
       int m = 11;
-      int n = 512;  // 2^(m-1)
+      //2**m = 2048
     
-      double tmp[2048];
+      double im[2048];
       double abs2[2048];
       int i;
 
-      for (i = 0; i < 2048; i++) tmp[i] = 0.0; 
+      for (i = 0; i < 2048; i++) im[i] = 0.0; 
 
       // TODO: Dos FFT reales por el precio de una FFT compleja.
-      FFT(1, m, &(channel_data_[0][0]), tmp);
+      FFT(1, m, &(channel_data_[0][0]), im);
             
       int max_index = 0;
       double max_value = 0.0;
-
-      int i;
+      
       for (i = 0; i < channel_size_[0]; i++) {
-            abs2[i] = channel_data_[0][i]*channel_data_[0][i] + tmp[i]*tmp[i];
+            abs2[i] = channel_data_[0][i]*channel_data_[0][i] + im[i]*im[i];
             if (abs2[i] >= max_value) {
                   max_value = abs2[i];
                   max_index = i;
             }
       }
 
-      
-      channel_frequency_[0] = i * 44100.0 / 2048.0;
+      channel_frequency_[0] = (max_index - 1024) * 44100.0 / 2048.0;
+      channel_frequency_[1] = -1.0;
       fft_count_++;
 
       return 0;

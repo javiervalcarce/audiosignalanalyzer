@@ -113,8 +113,8 @@ namespace thd_analyzer {
             // Búfer en el se reciben las muestras en el formato en que las entrega el ADC, que normalmente será int16_t
             // las muestras podrán pertenecer a un solo canal o a varios intercalados. Si por ejemplo hay dos canales
             // (estereo) entonces las muestras estarán dispuestas de la forma L R L R L R L R L R...)
-            short buf_[4096];
-            int   buf_size_;
+            int16_t* buf_data_;
+            int      buf_size_;
             int fft_count_;
 
             // Muestras correspondientes al canal L y R convertidas a coma flotante y normalizadas en el intevalo real
