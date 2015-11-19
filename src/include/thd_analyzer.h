@@ -73,6 +73,7 @@ namespace thd_analyzer {
                   int sampling_frequency; // frecuencia de muestreo, en hercios
             };
 
+
             /**
              */
             struct SignalProperties {
@@ -119,15 +120,21 @@ namespace thd_analyzer {
 
             // Muestras correspondientes al canal L y R convertidas a coma flotante y normalizadas en el intevalo real
             // [-1.0, 1.0)
-            double channel_data_[2][2048];
-            int    channel_size_[2];
-          
+            double** channel_data_;
+
+            int block_size_;
+            int sample_rate_;
+            int log2_block_size_;
+
             // Medidas realizadas sobre las señales L y R
             double channel_frequency_[2];
             double channel_amplitude_[2];
 
             static void* ThreadFuncHelper(void* p);
             void* ThreadFunc();
+
+
+            int DumpToTextFile(const char* file_name, int file_index, double* x, double* y, int size);
             
             /**
              * This computes an in-place complex-to-complex FFT 

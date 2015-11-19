@@ -53,7 +53,6 @@ namespace thd_analyzer {
              */
             void SetAmplitude(double amplitude);
 
-
       private:
 
             /**
@@ -98,23 +97,20 @@ namespace thd_analyzer {
             // Indica si el objeto se ha inicializado mediante Init()
             bool initialized_;
             bool run_;
-
+            int sample_rate_;
+            int block_size_;
             double frequency_;
             double amplitude_;
 
-            // XYZ
             std::string device_;
 
             snd_pcm_t* playback_handle_;
-            short buf[4096];
+            int16_t* buf_data_;
 
-            int playback_callback (snd_pcm_sframes_t nframes);
+            int SendSamples(snd_pcm_sframes_t nframes);
 
             static void* ThreadFuncHelper(void* p);
             void* ThreadFunc();
-            
-
-      
       };
 
 }

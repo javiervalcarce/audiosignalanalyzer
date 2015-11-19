@@ -16,16 +16,31 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
       initialized_ = false;
       exit_thread_ = false;
       capture_handle_ = NULL;
-      buf_data_ = new int16_t[4096];
+
+      sample_rate_ = 44100;
+      block_size_ = 512;
+
+      int n;
+
+      log2_block_size_ = 0;
+      n = 1;
+      while (n < block_size_) {
+            log2_block_size_++;
+            n = n * 2;
+      }
+
+
+      // Formato de muestra fijo: 16 bits LE = 4 bytes por frame (L y R)
+      buf_data_ = new int16_t[2 * block_size_];
       buf_size_ = 0;
       fft_count_ = 0;
 
-      channel_size_[0] = 0; 
-      channel_size_[1] = 0;
+      channel_data_    = new double*[2];
+      channel_data_[0] = new double[block_size_];
+      channel_data_[1] = new double[block_size_];
 
       channel_frequency_[0] = -1.0;
       channel_frequency_[1] = -1.0;
-
       channel_amplitude_[0] = 0.0;
       channel_amplitude_[1] = 0.0;
 
@@ -35,6 +50,9 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 ThdAnalyzer::~ThdAnalyzer() {
       exit_thread_ = true;
       delete[] buf_data_;
+      delete[] channel_data_[0];
+      delete[] channel_data_[1];
+      delete[] channel_data_;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -90,7 +108,7 @@ void* ThdAnalyzer::ThreadFuncHelper(void* p) {
 void* ThdAnalyzer::ThreadFunc() {
 
       int err;
-      int frames_to_deliver;
+
 
       // Inicialización del dispositivo de captura de audio: Parámetros HW
       // ---------------------------------------------------------------------------------------------------------------      
@@ -124,8 +142,8 @@ void* ThdAnalyzer::ThreadFunc() {
             return NULL;
       }
 	
-      unsigned int samplerate = 44100;
-      if ((err = snd_pcm_hw_params_set_rate_near(capture_handle_, hw_params, &samplerate, NULL)) < 0) {
+
+      if ((err = snd_pcm_hw_params_set_rate_near(capture_handle_, hw_params, (unsigned int*) &sample_rate_, NULL)) < 0) {
             fprintf (stderr, "cannot set sample rate (%s)\n", snd_strerror(err));
             return NULL;
       }
@@ -143,10 +161,12 @@ void* ThdAnalyzer::ThreadFunc() {
       snd_pcm_hw_params_free (hw_params);
 	
 
-      // Inicialización del dispositivo de captura de audio: Parámetros SW
+      // Inicialización del dispositivo de captura de audio:
+      // Parámetros SW
       // ---------------------------------------------------------------------------------------------------------------
-      // tell ALSA to wake us up whenever 4096 or more frames of playback data can be delivered. Also, tell ALSA that
-      // we'll start the device ourselves.
+      // tell ALSA to wake us up whenever block_size_ or more frames
+      // of playback data can be delivered. Also, tell ALSA that we'll
+      // start the device ourselves.
       snd_pcm_sw_params_t *sw_params;
 
       if ((err = snd_pcm_sw_params_malloc(&sw_params)) < 0) {
@@ -157,7 +177,7 @@ void* ThdAnalyzer::ThreadFunc() {
             fprintf (stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(err));
             return NULL;
       }
-      if ((err = snd_pcm_sw_params_set_avail_min(capture_handle_, sw_params, 4096)) < 0) {
+      if ((err = snd_pcm_sw_params_set_avail_min(capture_handle_, sw_params, block_size_)) < 0) {
             fprintf (stderr, "cannot set minimum available count (%s)\n", snd_strerror(err));
             return NULL;
       }
@@ -204,13 +224,13 @@ void* ThdAnalyzer::ThreadFunc() {
             //printf("debug: frames_to_deliver %d\n", frames_to_deliver);
 
             // Limito el número de muestras que voy a leer al tamaño del bufer en el que las voy a depositar.
-            frames_to_deliver = frames_to_deliver > 2048 ? 2048 : frames_to_deliver;
+            //frames_to_deliver = frames_to_deliver > block_size_ ? block_size_ : frames_to_deliver;
             
             // Lectura de las muestras de audio con signo de 16 bis
-            frames_to_deliver = 2048;
+
 
             int r;
-            int frames = frames_to_deliver;
+            int frames = block_size_;
             int16_t* b = buf_data_;
 
             do {
@@ -229,14 +249,11 @@ void* ThdAnalyzer::ThreadFunc() {
             //printf("COMPLETE\n");
 
             // Conversión de formato: de int16_t a coma flotante 
-            for (i = 0; i < frames_to_deliver; i++) {
+            for (i = 0; i < block_size_; i++) {
                   channel_data_[0][i] = ((double) buf_data_[2 * i + 0]) / 32678.0;
                   channel_data_[1][i] = ((double) buf_data_[2 * i + 1]) / 32678.0;
             }
-
-            channel_size_[0] = frames_to_deliver;
-            channel_size_[1] = frames_to_deliver;
-
+           
             // proc
             Process();
 
@@ -253,37 +270,52 @@ void* ThdAnalyzer::ThreadFunc() {
 int ThdAnalyzer::Process() {
 
       // En channel_data[x] tenemos las muestras en coma flotante correspondientes al canal x
-      // En channel_size[x] tenemos el número de muestras correspondientes al canal x
-
-      int m = 11;
-      //2**m = 2048
-    
+      // 
+      
       double im[2048];
       double abs2[2048];
-      int i;
 
+      int i;
       for (i = 0; i < 2048; i++) im[i] = 0.0; 
 
       // TODO: Dos FFT reales por el precio de una FFT compleja.
-      FFT(1, m, &(channel_data_[0][0]), im);
+      FFT(1, log2_block_size_, channel_data_[0], im);
             
       int max_index = 0;
       double max_value = 0.0;
       
-      for (i = 0; i < channel_size_[0]; i++) {
+      for (i = 0; i < block_size_; i++) {
+
             abs2[i] = channel_data_[0][i]*channel_data_[0][i] + im[i]*im[i];
+
             if (abs2[i] >= max_value) {
                   max_value = abs2[i];
                   max_index = i;
             }
       }
-
-      channel_frequency_[0] = (max_index - 1024) * 44100.0 / 2048.0;
+      
+      //      channel_frequency_[0] = (max_index - block_size_ / 2) * sample_rate_ / block_size_;
+      channel_frequency_[0] = max_index * sample_rate_ / block_size_;
       channel_frequency_[1] = -1.0;
       fft_count_++;
 
+      /*
+      if (fft_count_ % 100 == 0) {
+            printf("plot!\n");
+            for (i = 0; i < block_size_; i++) {
+                  printf("%f\n", abs2[i]);
+            }            
+      }
+      */
+
       return 0;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+int ThdAnalyzer::DumpToTextFile(const char* file_name, int file_index, double* x, double* y, int size) {
+      return 0;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void ThdAnalyzer::FFT(short int dir, long m,double *x,double *y) {
