@@ -20,8 +20,8 @@ WaveformGenerator::WaveformGenerator(const char* playback_pcm_device) {
 
       pthread_attr_init(&thread_attr_);
 
-      sample_rate_ = 44100;
-      block_size_  = 512;
+      sample_rate_ = 48000;
+      block_size_  = 1024;
       buf_data_    = new int16_t[2 * block_size_];
       frequency_   = 440;
       amplitude_   = 1.0;
@@ -149,7 +149,7 @@ void* WaveformGenerator::ThreadFunc() {
             fprintf (stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(err));
             return NULL;
       }
-      if ((err = snd_pcm_sw_params_set_avail_min(playback_handle_, sw_params, 4096)) < 0) {
+      if ((err = snd_pcm_sw_params_set_avail_min(playback_handle_, sw_params, block_size_)) < 0) {
             fprintf (stderr, "cannot set minimum available count (%s)\n", snd_strerror(err));
             return NULL;
       }

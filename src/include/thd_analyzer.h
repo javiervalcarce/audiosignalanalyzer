@@ -122,6 +122,7 @@ namespace thd_analyzer {
             // [-1.0, 1.0)
             double** channel_data_;
 
+
             int block_size_;
             int sample_rate_;
             int log2_block_size_;
@@ -129,6 +130,10 @@ namespace thd_analyzer {
             // Medidas realizadas sobre las señales L y R
             double channel_frequency_[2];
             double channel_amplitude_[2];
+
+            double* im;
+            double* abs2;
+
 
             static void* ThreadFuncHelper(void* p);
             void* ThreadFunc();

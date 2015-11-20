@@ -18,7 +18,7 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
       capture_handle_ = NULL;
 
       sample_rate_ = 44100;
-      block_size_ = 512;
+      block_size_ = 4096;
 
       int n;
 
@@ -39,6 +39,9 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
       channel_data_[0] = new double[block_size_];
       channel_data_[1] = new double[block_size_];
 
+      im   = new double[block_size_];
+      abs2 = new double[block_size_];
+
       channel_frequency_[0] = -1.0;
       channel_frequency_[1] = -1.0;
       channel_amplitude_[0] = 0.0;
@@ -49,10 +52,15 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ThdAnalyzer::~ThdAnalyzer() {
       exit_thread_ = true;
+      //pthread_join() TODO
+
       delete[] buf_data_;
       delete[] channel_data_[0];
       delete[] channel_data_[1];
       delete[] channel_data_;
+      
+      delete[] abs2;
+      delete[] im;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -270,13 +278,10 @@ void* ThdAnalyzer::ThreadFunc() {
 int ThdAnalyzer::Process() {
 
       // En channel_data[x] tenemos las muestras en coma flotante correspondientes al canal x
-      // 
-      
-      double im[2048];
-      double abs2[2048];
-
       int i;
-      for (i = 0; i < 2048; i++) im[i] = 0.0; 
+      for (i = 0; i < block_size_; i++) {
+            im[i] = 0.0; 
+      }
 
       // TODO: Dos FFT reales por el precio de una FFT compleja.
       FFT(1, log2_block_size_, channel_data_[0], im);
@@ -287,14 +292,14 @@ int ThdAnalyzer::Process() {
       for (i = 0; i < block_size_; i++) {
 
             abs2[i] = channel_data_[0][i]*channel_data_[0][i] + im[i]*im[i];
-
             if (abs2[i] >= max_value) {
                   max_value = abs2[i];
                   max_index = i;
             }
       }
       
-      //      channel_frequency_[0] = (max_index - block_size_ / 2) * sample_rate_ / block_size_;
+      
+      // channel_frequency_[0] = (max_index - block_size_ / 2) * sample_rate_ / block_size_;
       channel_frequency_[0] = max_index * sample_rate_ / block_size_;
       channel_frequency_[1] = -1.0;
       fft_count_++;

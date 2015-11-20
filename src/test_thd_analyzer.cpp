@@ -64,11 +64,6 @@ int main(int argc, char** argv) {
             }
       }
 
-
-      // Conversión de la dirección en el bus i2c (cadena) en un número entero.
-      char* endptr;
-      int address;
-
       driver = new ThdAnalyzer(device_.c_str()); 
       if (driver->Init() != 0) {
             printf("Error: During ALSA device initialization.\n");
