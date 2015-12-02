@@ -14,15 +14,17 @@ using namespace thd_analyzer;
 
 // tabla de opciones para getopt_long
 struct option long_options[] = {
-      { "device",   required_argument, 0, 'a' },
-      { "frequency",   required_argument, 0, 'f' },
-      { "help",     no_argument,       0, 'h' },   
-      { 0,          0,                 0,  0  }
+      { "device",    required_argument, 0, 'a' },
+      { "frequency", required_argument, 0, 'f' },
+      { "sweep",     no_argument,       0, 's' },
+      { "help",      no_argument,       0, 'h' },   
+      { 0,           0,                 0,  0  }
 };
 
 std::string device_;
 WaveformGenerator* obj = NULL;
 int frequency = 440;
+bool sweep = false;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void Usage();
@@ -49,6 +51,9 @@ int main(int argc, char** argv) {
                   Usage();
                   exit(0);
                   break;
+            case 's':
+                  sweep = true;
+                  break;
             case 'd':
                   device_ = std::string(optarg);
                   break;
@@ -68,9 +73,18 @@ int main(int argc, char** argv) {
             return 1;
       } 
 
-      printf("Playing %d Hz tone for 3 seconds...\n", frequency);
+      printf("Playing %d Hz tone for 30 seconds...\n", frequency);
       obj->SetFrequency(frequency);
-      sleep(3);
+
+      int count = 30;
+      while (count > 0) {
+            sleep(1);
+            count--;
+            if (sweep == true) {
+                  frequency += 500;
+                  obj->SetFrequency(frequency);
+            }
+      }
       printf("\n");
       return 0;
 }

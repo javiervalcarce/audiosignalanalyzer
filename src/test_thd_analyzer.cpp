@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
 
       driver->Start();
 
-      int times = 50;
+      int times = 500;
       while (times > 0) {
             printf("Block %06d - frequency %f\n", driver->Count(), driver->Frequency(0));
             usleep(200000); // 0,5 segundos

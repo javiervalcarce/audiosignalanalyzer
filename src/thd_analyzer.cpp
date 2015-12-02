@@ -17,8 +17,8 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
       exit_thread_ = false;
       capture_handle_ = NULL;
 
-      sample_rate_ = 44100;
-      block_size_ = 4096;
+      sample_rate_ = 192000; //48000;
+      block_size_ = 8192; //4096;
 
       int n;
 
@@ -54,13 +54,15 @@ ThdAnalyzer::~ThdAnalyzer() {
       exit_thread_ = true;
       //pthread_join() TODO
 
-      delete[] buf_data_;
-      delete[] channel_data_[0];
-      delete[] channel_data_[1];
-      delete[] channel_data_;
-      
       delete[] abs2;
       delete[] im;
+
+
+      delete[] channel_data_[1];
+      delete[] channel_data_[0];
+      delete[] channel_data_;
+      delete[] buf_data_;
+      
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -205,7 +207,6 @@ void* ThdAnalyzer::ThreadFunc() {
       }
 
 
-
       while (1) {
             
             //usleep(100000); // DEBUG
@@ -236,7 +237,6 @@ void* ThdAnalyzer::ThreadFunc() {
             
             // Lectura de las muestras de audio con signo de 16 bis
 
-
             int r;
             int frames = block_size_;
             int16_t* b = buf_data_;
@@ -248,8 +248,8 @@ void* ThdAnalyzer::ThreadFunc() {
                   b += r * 2; 
                   frames -= r;
                   
-                  if (r == 0) printf("ZERO!\n");
-                  if (r <  0) printf("ERROR!\n");
+                  if (r == 0) printf("r = 0!\n");
+                  if (r <  0) printf("r < 0!\n");
 
             } while (r >= 1 && frames > 0);
 

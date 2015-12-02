@@ -20,7 +20,7 @@ WaveformGenerator::WaveformGenerator(const char* playback_pcm_device) {
 
       pthread_attr_init(&thread_attr_);
 
-      sample_rate_ = 48000;
+      sample_rate_ = 192000; //44100;
       block_size_  = 1024;
       buf_data_    = new int16_t[2 * block_size_];
       frequency_   = 440;
@@ -137,28 +137,29 @@ void* WaveformGenerator::ThreadFunc() {
       /* tell ALSA to wake us up whenever block_size_ or more frames of playback data can be delivered. Also, tell
                ALSA that we'll start the device ourselves.
       */
+
       // SW Parameters
       // ---------------------------------------------------------------------------------------------------------------      
-      snd_pcm_sw_params_t *sw_params;
+      snd_pcm_sw_params_t* sw_params;
 
       if ((err = snd_pcm_sw_params_malloc(&sw_params)) < 0) {
-            fprintf (stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror(err));
+            fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror(err));
             return NULL;
       }
       if ((err = snd_pcm_sw_params_current(playback_handle_, sw_params)) < 0) {
-            fprintf (stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(err));
+            fprintf(stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(err));
             return NULL;
       }
       if ((err = snd_pcm_sw_params_set_avail_min(playback_handle_, sw_params, block_size_)) < 0) {
-            fprintf (stderr, "cannot set minimum available count (%s)\n", snd_strerror(err));
+            fprintf(stderr, "cannot set minimum available count (%s)\n", snd_strerror(err));
             return NULL;
       }
       if ((err = snd_pcm_sw_params_set_start_threshold(playback_handle_, sw_params, 0U)) < 0) {
-            fprintf (stderr, "cannot set start mode (%s)\n", snd_strerror(err));
+            fprintf(stderr, "cannot set start mode (%s)\n", snd_strerror(err));
             return NULL;
       }
       if ((err = snd_pcm_sw_params(playback_handle_, sw_params)) < 0) {
-            fprintf (stderr, "cannot set software parameters (%s)\n", snd_strerror(err));
+            fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(err));
             return NULL;
       }
 
@@ -174,17 +175,17 @@ void* WaveformGenerator::ThreadFunc() {
             
             // wait till the interface is ready for data, or 1 second has elapsed.            
             if ((err = snd_pcm_wait (playback_handle_, 1000)) < 0) {
-                  fprintf (stderr, "poll failed (%s)\n", strerror (errno));
+                  fprintf(stderr, "poll failed (%s)\n", strerror (errno));
                   break;
             }           
             
             // find out how much space is available for playback data
             if ((frames_to_deliver = snd_pcm_avail_update (playback_handle_)) < 0) {
                   if (frames_to_deliver == -EPIPE) {
-                        fprintf (stderr, "an xrun occured\n");
+                        fprintf(stderr, "an xrun occured\n");
                         break;
                   } else {
-                        fprintf (stderr, "unknown ALSA avail update return value (%d)\n", frames_to_deliver);
+                        fprintf(stderr, "unknown ALSA avail update return value (%d)\n", frames_to_deliver);
                         break;
                   }
             }
@@ -195,7 +196,6 @@ void* WaveformGenerator::ThreadFunc() {
                   break;
             }
       }
-      
 
       snd_pcm_close(playback_handle_);
       return NULL;
@@ -211,17 +211,20 @@ int WaveformGenerator::SendSamples(snd_pcm_sframes_t nframes) {
       short s;
 
       double w = 2 * M_PI * frequency_ / sample_rate_;
-      //printf("%f\n", frequency_);
+      //double w = 2 * M_PI * frequency_ / sample_rate_ / 4; 
+      // Esto funciona, ¿por qué? Sospecha: empaquetado de muestras con snd_pcm_writei
+
 
       for (i = 0; i < nframes; i++) {
-            s = (short) (32767 * amplitude_ * cos(w * n));
-            //s = (short) (22767 * amplitude_ * cos(w * n));
+            s = (int16_t) (32767 * amplitude_ * cos(w * n));
             n++;
 
-            buf_data_[2 * i + 0] = s;
-            buf_data_[2 * i + 1] = s;
+            // Escribo un "frame". Un frame es un bloque de 2 muestras: una muestra del canal L y otra del R
+            buf_data_[2 * i + 0] = s; // Canal L
+            buf_data_[2 * i + 1] = s; // Canal R
       }
       
+      // Envio las muestras (intercaladas L R L R L R...) al convertidor D/A
       if ((err = snd_pcm_writei(playback_handle_, buf_data_, nframes)) < 0) {
             fprintf(stderr, "write failed (%s)\n", snd_strerror(err));
       }
