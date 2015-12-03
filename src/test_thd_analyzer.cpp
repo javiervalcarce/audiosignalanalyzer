@@ -72,14 +72,20 @@ int main(int argc, char** argv) {
 
       driver->Start();
 
-      int times = 500;
-      while (times > 0) {
-            printf("Block %06d - frequency %f\n", driver->Count(), driver->Frequency(0));
-            usleep(200000); // 0,5 segundos
-            times--;
+      int fbin;
+      
+      printf("Estimating maximum power frequency:\n");
+      while (1) {
+            
+            fbin = driver->Frequency(0);
+            
+            printf("\rCHANNEL L Block %06d - Frequency %05.3f Hz- Power %05.2f dB", driver->Count(), driver->Frequency(0), driver->PowerSpectralDensity(0, fbin);
+
+            fflush(stdout);
+
+            usleep(200000); // 0,1 segundos
       }
 
-      printf("FIN\n");
       return 0;
 }
 

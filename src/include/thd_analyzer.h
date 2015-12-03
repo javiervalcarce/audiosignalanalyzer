@@ -10,8 +10,12 @@ namespace thd_analyzer {
 
 
       /**
-       * Análisis de un tono puro. Estima la frecuencia central, su potencia y la de sus armónicos y con todo ello
-       * calcula la distorsión harmónica total (THD - Total Harmonic Distortion).
+       * ThdAnalyzer.
+       *
+       * Procesa y analiza N señales de audio. El dispositivo de captura (ADC) del sistema puede ser, en general,
+       * multicanal, y podrá muestrear N señales. Lo típico es que sea estéreo con lo cual N = 2 canales (L y R).
+       *
+       * Para la obtención de las muestras usa la API Linux ALSA.
        *
        */
       class ThdAnalyzer {
@@ -20,39 +24,55 @@ namespace thd_analyzer {
             /**
              * Constructor.
              *
-             * @param capture_device.
+             * @param capture_device El dispositivo ALSA de captura de muestras de audio, por ejemplo "default" es el
+             * dispositivo predeterminado del sistema y casi siempre representa la entrada de linea o micrófono, otros
+             * dispositivos son por ejemplo "hw:0,0", "hw:1,0", "plughw:0,0", etc... Todo esto depende del sistema en
+             * concreto, pruebe a ejecutar el programa "arecord -l" para ver una lista de dispositivos. Importante:
+             * ajuste el volumen de grabación y active el capturador con alsamixer primero.
              */
             ThdAnalyzer(const char* capture_device);
 
+
             /**
-             * Destructor.
+             * Destructor. 
              *
+             * Detiene el hilo de procesado de señal y libera toda la memoria que se pidió en el constructor.
              */
             ~ThdAnalyzer();
 
             /**
              * Inicialización.
+             *
+             * Pone en marcha el hilo de procesado de señal, que comenzará detenido. Para ponerlo en marcha y hay que
+             * llamar a Start().
              */
             int Init();
 
+
             /**
-             *
-             *
+             * Da comienzo a la captura de muestras de audio y al análisis de las señales. Mientras el análisis esté en
+             * marcha podremos llamar a las funciones Frequency() etc para obtener las medidas.
              */
             int Start();
 
+
             /**
-             *
-             *
+             * Detiene la captura de muestras de audio y el análisis. Las medidas no cambiarán, se mantendrán en el
+             * último estado antes de llamar a Stop().
              */
             int Stop();
+
+
+            //
+            //int Reset();
+
 
             /**
              * Frecuencia cuyo coeficiente en la transformada tiene módulo máximo, expresado en Hz.
              *
              * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
              */
-            double Frequency(int channel);
+            int FindPeak(int channel);
 
             /**
              * Amplitud máxima del pedazo de señal, normalizada entre 0.0 y 1.0, para convertir esto en voltios hay que
@@ -60,45 +80,45 @@ namespace thd_analyzer {
              *
              * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
              */
-            double Amplitude(int channel);
+            double RmsAmplitude(int channel);
+            
+            
+            /**
+             * PSD.
+             *
+             * @param frequency_bin Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
+             */
+            double PowerSpectrumDensity(int channel, int frequency_index);
 
-            int Count() { return fft_count_; }
+            /**
+             *
+             */
+            double AnalogFrequency(int frequency_index);
+
+
+            /**
+             */
+            int BlockCount() const;
+
+            /**
+             */
+            int BlockSize() const;
+
 
       private:
 
-            /**
-             */
-            struct AdcProperties {
-                  double input_range; // rango de entrada, correspondiente a una muetra 1.0, en voltios
-                  int sampling_frequency; // frecuencia de muestreo, en hercios
-            };
-
 
             /**
+             * Canal
              */
-            struct SignalProperties {
+            struct Channel {
                   double rms_amplitude;
                   double main_harmonic;
                   double thd;
             };
 
 
-            /**
-             */
-            struct Buffer {
-                  Buffer(int msize) {
-                        size= msize;
-                        data = new double[msize];    
-                  }
-    
-                  ~Buffer() {
-                        delete[] data;
-                  }
-    
-                  int size;
-                  double* data;
-            };
-
+            // Hilo
             pthread_t thread_;
             pthread_attr_t thread_attr_;
 
@@ -111,33 +131,42 @@ namespace thd_analyzer {
             // Representa el dispositivo ALSA de captura de audio.
             snd_pcm_t* capture_handle_;
 
+            // Tamaño de bloque
+            int block_size_;
+            int block_size_log2_;
+            int sample_rate_;
+
+            
+
             // Búfer en el se reciben las muestras en el formato en que las entrega el ADC, que normalmente será int16_t
             // las muestras podrán pertenecer a un solo canal o a varios intercalados. Si por ejemplo hay dos canales
             // (estereo) entonces las muestras estarán dispuestas de la forma L R L R L R L R L R...)
             int16_t* buf_data_;
             int      buf_size_;
-            int fft_count_;
+
+
 
             // Muestras correspondientes al canal L y R convertidas a coma flotante y normalizadas en el intevalo real
             // [-1.0, 1.0)
             double** channel_data_;
-
-
-            int block_size_;
-            int sample_rate_;
-            int log2_block_size_;
+            
+            // Densidad espectral de potencia estimada
+            double** channel_pwsd_;
 
             // Medidas realizadas sobre las señales L y R
             double channel_frequency_[2];
             double channel_amplitude_[2];
+            int block_count_[2];
 
+
+            // Búferes temporales
             double* im;
             double* abs2;
 
 
             static void* ThreadFuncHelper(void* p);
-            void* ThreadFunc();
 
+            void* ThreadFunc();
 
             int DumpToTextFile(const char* file_name, int file_index, double* x, double* y, int size);
             
@@ -150,7 +179,7 @@ namespace thd_analyzer {
             void FFT(short int dir, long m, double* x, double* y);
 
             /**
-             *
+             * Process
              */
             int Process();
       
