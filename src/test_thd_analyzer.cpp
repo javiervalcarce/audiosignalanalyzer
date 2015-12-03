@@ -25,7 +25,7 @@ struct option long_options[] = {
 };
 
 std::string device_;
-ThdAnalyzer* driver = NULL;
+ThdAnalyzer* analyzer = NULL;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -64,26 +64,30 @@ int main(int argc, char** argv) {
             }
       }
 
-      driver = new ThdAnalyzer(device_.c_str()); 
-      if (driver->Init() != 0) {
+      analyzer = new ThdAnalyzer(device_.c_str()); 
+      if (analyzer->Init() != 0) {
             printf("Error: During ALSA device initialization.\n");
             return 1;
       } 
 
-      driver->Start();
+      analyzer->Start();
 
       int fbin;
       
       printf("Estimating maximum power frequency:\n");
       while (1) {
-            
-            fbin = driver->Frequency(0);
-            
-            printf("\rCHANNEL L Block %06d - Frequency %05.3f Hz- Power %05.2f dB", driver->Count(), driver->Frequency(0), driver->PowerSpectralDensity(0, fbin);
 
-            fflush(stdout);
+            for (int c = 0; c < 2; c++) {
 
-            usleep(200000); // 0,1 segundos
+                  fbin = analyzer->FindPeak(c);            
+                  printf("CHANNEL %d B%06d - Frequency %07.1f Hz, Power %05.1f dB\n", 
+                         c,
+                         analyzer->BlockCount(), 
+                         analyzer->AnalogFrequency(fbin), 
+                         analyzer->PowerSpectralDensity(c, fbin));
+            }
+            //fflush(stdout);
+            usleep(500000); // 0,1 segundos
       }
 
       return 0;

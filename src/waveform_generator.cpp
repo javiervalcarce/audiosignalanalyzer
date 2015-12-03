@@ -185,7 +185,7 @@ void* WaveformGenerator::ThreadFunc() {
                         fprintf(stderr, "an xrun occured\n");
                         break;
                   } else {
-                        fprintf(stderr, "unknown ALSA avail update return value (%d)\n", frames_to_deliver);
+                        fprintf(stderr, "unknown ALSA avail update return value (%ld)\n", frames_to_deliver);
                         break;
                   }
             }

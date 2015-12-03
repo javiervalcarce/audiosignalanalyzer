@@ -88,7 +88,7 @@ namespace thd_analyzer {
              *
              * @param frequency_bin Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
              */
-            double PowerSpectrumDensity(int channel, int frequency_index);
+            double PowerSpectralDensity(int channel, int frequency_index);
 
             /**
              *
@@ -104,18 +104,46 @@ namespace thd_analyzer {
              */
             int BlockSize() const;
 
-
       private:
 
 
+            // Parametros comunes a todos los canales
+
+            // Tamaño de bloque en muestras. El procesamiento de señal
+            // se hace por bloques de muestras, no muestra a muestra, que seria muy ineficiente.
+            int block_size_;
+
+            // log2(tamaño del bloque)
+            int block_size_log2_;
+
+            // Frecuencia de muestreo
+            int sample_rate_;
+
+            // Numero de bloques procesados
+            int block_count_;
+
             /**
-             * Canal
+             * Canal de entrada (L o R)
              */
             struct Channel {
-                  double rms_amplitude;
-                  double main_harmonic;
-                  double thd;
+
+                  // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
+                  double* data;
+
+                  // |block_size_| muestras de la densidad espectral de potencia estimada
+                  double* pwsd;
+                  
+                  double rms;
+                  double peakv;
+                  int peakf;
+                 
             };
+
+            Channel* channel_;
+
+            // Búferes temporales
+            double* im;
+            double* abs2;
 
 
             // Hilo
@@ -125,44 +153,18 @@ namespace thd_analyzer {
             // Indica si el objeto se ha inicializado mediante Init()
             bool initialized_;
             bool exit_thread_;
+
             // Dispositivo ALSA de captura
             std::string device_;
 
             // Representa el dispositivo ALSA de captura de audio.
             snd_pcm_t* capture_handle_;
 
-            // Tamaño de bloque
-            int block_size_;
-            int block_size_log2_;
-            int sample_rate_;
-
-            
-
             // Búfer en el se reciben las muestras en el formato en que las entrega el ADC, que normalmente será int16_t
             // las muestras podrán pertenecer a un solo canal o a varios intercalados. Si por ejemplo hay dos canales
             // (estereo) entonces las muestras estarán dispuestas de la forma L R L R L R L R L R...)
             int16_t* buf_data_;
             int      buf_size_;
-
-
-
-            // Muestras correspondientes al canal L y R convertidas a coma flotante y normalizadas en el intevalo real
-            // [-1.0, 1.0)
-            double** channel_data_;
-            
-            // Densidad espectral de potencia estimada
-            double** channel_pwsd_;
-
-            // Medidas realizadas sobre las señales L y R
-            double channel_frequency_[2];
-            double channel_amplitude_[2];
-            int block_count_[2];
-
-
-            // Búferes temporales
-            double* im;
-            double* abs2;
-
 
             static void* ThreadFuncHelper(void* p);
 

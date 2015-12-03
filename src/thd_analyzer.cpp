@@ -9,6 +9,8 @@
 
 using namespace thd_analyzer;
 
+static const int kChannelCount = 2;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 
@@ -19,7 +21,7 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 
       sample_rate_ = 192000; //48000;
       block_size_ = 8192; //4096;
-
+      block_count_ = 0;
 
       // calculo de log2(block_size_)
       block_size_log2_ = 0;
@@ -29,33 +31,28 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
             n = n * 2;
       }
 
-      block_count_ = 0;
-
-
       // Formato nativo de las muestras, tal cual vienen el propio hardware.
       // 16 bits LE = 4 bytes por frame, un frame es una muestra del canal L y otra del canal R
-      buf_data_ = new int16_t[2 * block_size_];
+      buf_data_ = new int16_t[kChannelCount * block_size_];
       buf_size_ = 0;
+      
+      channel_ = new Channel[kChannelCount];
 
+      int c;
 
-      // Muestras del canal L (0) y del canal R (1) convertidas a coma flotante.
-      channel_data_    = new double*[2];
-      channel_data_[0] = new double[block_size_]; // canal L
-      channel_data_[1] = new double[block_size_]; // canal R
+      for (c = 0; c < kChannelCount; c++) {
+            // canal L
+            channel_[c].data = new double[block_size_];
+            channel_[c].pwsd = new double[block_size_];
+            channel_[c].peakf = 0;
+            channel_[c].peakv = 0.0;
+            channel_[c].rms = 0.0;
+      }
 
-
-      // Estimación actual de la densidad espectral de potencia del canal L (0) y del canal R (1)
-      channel_pwsd_    = new double*[2];
-      channel_pwsd_[0] = new double[block_size_]; // canal L
-      channel_pwsd_[1] = new double[block_size_]; // canal R
-
+      // Buferes temporales
       im   = new double[block_size_];
       abs2 = new double[block_size_];
 
-      channel_frequency_[0] = -1.0;
-      channel_frequency_[1] = -1.0;
-      channel_amplitude_[0] = 0.0;
-      channel_amplitude_[1] = 0.0;
 
 }
 
@@ -64,16 +61,18 @@ ThdAnalyzer::~ThdAnalyzer() {
       exit_thread_ = true;
       //pthread_join() TODO
 
+      int c;
+
+      for (c = 0; c < kChannelCount; c++) {
+            delete[] channel_[c].data;
+            delete[] channel_[c].pwsd;
+      }
+
+      delete[] channel_;
+
       delete[] abs2;
       delete[] im;
 
-      delete[] channel_pwsd_[1];
-      delete[] channel_pwsd_[0];
-      delete[] channel_pwsd_;
-
-      delete[] channel_data_[1];
-      delete[] channel_data_[0];
-      delete[] channel_data_;
       delete[] buf_data_;
       
 }
@@ -90,7 +89,6 @@ int ThdAnalyzer::Init() {
 
       initialized_ = true;
       return 0;
-
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -108,38 +106,43 @@ int ThdAnalyzer::Stop() {
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-double ThdAnalyzer::FindPeak(int channel) {
+int ThdAnalyzer::FindPeak(int channel) {
       assert(initialized_ == true);
-      return channel_frequency_[channel];
+      assert(channel < kChannelCount);
+      return channel_[channel].peakf;
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double ThdAnalyzer::RmsAmplitude(int channel) {
       assert(initialized_ == true);
-      return channel_amplitude_[channel];
+      assert(channel < kChannelCount);
+      return channel_[channel].rms;
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-double ThdAnalyzer::PowerSpectralDensity(int frequency_bin) {
-      
-      return 0.0;
+double ThdAnalyzer::PowerSpectralDensity(int channel, int frequency_index) {
+      assert(initialized_ == true);
+      assert(channel < kChannelCount);
+      return channel_[channel].peakv;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double ThdAnalyzer::AnalogFrequency(int frequency_index) {
-      
-      return 0.0;
+      assert(initialized_ == true);
+      return ((double) frequency_index * sample_rate_) / block_size_;      
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int ThdAnalyzer::BlockCount() const {       
+      assert(initialized_ == true);
       return block_count_; 
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int ThdAnalyzer::BlockSize() const { 
+int ThdAnalyzer::BlockSize() const {
+      assert(initialized_ == true);
       return block_size_;
 }
 
@@ -154,7 +157,6 @@ void* ThdAnalyzer::ThreadFuncHelper(void* p) {
 void* ThdAnalyzer::ThreadFunc() {
 
       int err;
-
 
       // Inicialización del dispositivo de captura de audio: Parámetros HW
       // ---------------------------------------------------------------------------------------------------------------      
@@ -187,7 +189,6 @@ void* ThdAnalyzer::ThreadFunc() {
             fprintf (stderr, "cannot set sample format (%s)\n", snd_strerror(err));
             return NULL;
       }
-	
 
       if ((err = snd_pcm_hw_params_set_rate_near(capture_handle_, hw_params, (unsigned int*) &sample_rate_, NULL)) < 0) {
             fprintf (stderr, "cannot set sample rate (%s)\n", snd_strerror(err));
@@ -205,7 +206,6 @@ void* ThdAnalyzer::ThreadFunc() {
       }
 	
       snd_pcm_hw_params_free (hw_params);
-	
 
       // Inicialización del dispositivo de captura de audio:
       // Parámetros SW
@@ -242,36 +242,7 @@ void* ThdAnalyzer::ThreadFunc() {
             return NULL;
       }
 
-
       while (1) {
-            
-            //usleep(100000); // DEBUG
-
-            /*
-            // Wait till the interface is ready for data, or 1 second has elapsed
-            if ((err = snd_pcm_wait(capture_handle_, 1000)) < 0) {
-                  fprintf (stderr, "poll failed (%s)\n", strerror(errno));
-                  break;
-            }           
-            
-            // Find out how much data is available in the capture device
-            if ((frames_to_deliver = snd_pcm_avail_update(capture_handle_)) < 0) {
-                  if (frames_to_deliver == -EPIPE) {
-                        fprintf (stderr, "an xrun occured\n");
-                        break;
-                  } else {
-                        fprintf (stderr, "unknown ALSA avail update return value (%d)\n", frames_to_deliver);
-                        break;
-                  }
-            }
-            */
-
-            //printf("debug: frames_to_deliver %d\n", frames_to_deliver);
-
-            // Limito el número de muestras que voy a leer al tamaño del bufer en el que las voy a depositar.
-            //frames_to_deliver = frames_to_deliver > block_size_ ? block_size_ : frames_to_deliver;
-            
-            // Lectura de las muestras de audio con signo de 16 bis
 
             int r;
             int frames = block_size_;
@@ -286,22 +257,30 @@ void* ThdAnalyzer::ThreadFunc() {
                   frames -= r;
                   
                   // DEBUG
-                  if (r == 0) printf("r = 0!\n");
-                  if (r <  0) printf("r < 0!\n");
-
+                  if (r == 0) printf("Error r = 0\n");
+                  if (r <  0) printf("Error r < 0\n");
 
             } while (r >= 1 && frames > 0);
 
             int i;
-
             // Conversión de formato: de int16_t a coma flotante 
             for (i = 0; i < block_size_; i++) {
-                  channel_data_[0][i] = ((double) buf_data_[2 * i + 0]) / 32678.0;
-                  channel_data_[1][i] = ((double) buf_data_[2 * i + 1]) / 32678.0;
+                  channel_[0].data[i] = ((double) buf_data_[2 * i + 0]) / 32678.0;
+                  channel_[1].data[i] = ((double) buf_data_[2 * i + 1]) / 32678.0;
             }
-           
-            // proc
+
+            // Debug
+            /*
+            static int z = 0;
+            for (i = 0; i < block_size_; i++) {
+                  channel_[0].data[i] = cos(30000.0 * M_PI / (sample_rate_ / 2) * z);
+                  channel_[1].data[i] = cos(30000.0 * M_PI / (sample_rate_ / 2) * z);
+                  z++;
+            }
+            */
+
             Process();
+            block_count_++;
 
             if (exit_thread_ == true) {
                   break;
@@ -316,58 +295,40 @@ void* ThdAnalyzer::ThreadFunc() {
 int ThdAnalyzer::Process() {
 
       int i;
+      int c;
+      int max_index;
+      double max_value;
 
       // TODO: Dos FFT reales por el precio de una FFT compleja.
-
-      // Canal 0
-      for (i = 0; i < block_size_; i++) im[i] = 0.0; 
-      FFT(1, block_size_log2_, channel_data_[0], im);
-
-
-
-      // Canal 1
-      for (i = 0; i < block_size_; i++) im[i] = 0.0; 
-      FFT(1, block_size_log2_, channel_data_[1], im);
-
+      for (c = 0; c < kChannelCount; c++) {
+            // Canal c-esimo
+            for (i = 0; i < block_size_; i++) im[i] = 0.0; 
+            FFT(1, block_size_log2_, channel_[c].data, im);
             
-      int max_index = 0;
-      double max_value = 0.0;
-      
-      for (i = 0; i < block_size_; i++) {
+            max_index = 0;
+            max_value = 0.0;
 
-            abs2[i] = channel_data_[0][i] * channel_data_[0][i] + im[i]*im[i];
-            if (abs2[i] >= max_value) {
-                  max_value = abs2[i];
-                  max_index = i;
+            // abs2 no hace falta.
+            // solo frecuencias positivasgfv 
+            for (i = 0; i < block_size_/2; i++) {
+                  abs2[i] = channel_[c].data[i] * channel_[c].data[i] + im[i]*im[i];
+                  if (abs2[i] >= max_value) {
+                        max_value = abs2[i];
+                        max_index = i;
+                  }
             }
+            
+            // channel_frequency_[0] = (max_index - block_size_ / 2) * sample_rate_ / block_size_;
+            channel_[c].peakv = max_value; 
+            channel_[c].peakf = max_index;
       }
-      
-      
-      // channel_frequency_[0] = (max_index - block_size_ / 2) * sample_rate_ / block_size_;
-      channel_frequency_[0] = max_index * sample_rate_ / block_size_;
-      channel_frequency_[1] = -1.0;
-      block_count_++;
-
-      /*
-      if (block_count_ % 100 == 0) {
-            printf("plot!\n");
-            for (i = 0; i < block_size_; i++) {
-                  printf("%f\n", abs2[i]);
-            }            
-      }
-      */
 
       return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int ThdAnalyzer::DumpToTextFile(const char* file_name, int file_index, double* x, double* y, int size) {
-
       // Impresión por pantalla de la DFT^2 en dB (10log10)
-      
-      
-
-
       return 0;
 }
 
