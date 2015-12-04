@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
             return 1;
       } 
 
-      analyzer->Start();
+      //analyzer->Start();
 
       int fbin;
       
@@ -80,12 +80,18 @@ int main(int argc, char** argv) {
             for (int c = 0; c < 2; c++) {
 
                   fbin = analyzer->FindPeak(c);            
-                  printf("CHANNEL %d B%06d - Frequency %07.1f Hz, Power %05.1f dB\n", 
+                  printf("CHANNEL %d B%06d - Frequency %07.1f Hz, Power %014.8f dB\n", 
                          c,
                          analyzer->BlockCount(), 
                          analyzer->AnalogFrequency(fbin), 
                          analyzer->PowerSpectralDensity(c, fbin));
             }
+
+            // Retrocedo dos líneas
+            printf("\r");
+            printf("\x1b[A");
+            printf("\x1b[A");
+
             //fflush(stdout);
             usleep(500000); // 0,1 segundos
       }

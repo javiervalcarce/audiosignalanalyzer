@@ -12,10 +12,22 @@ namespace thd_analyzer {
       /**
        * ThdAnalyzer.
        *
-       * Procesa y analiza N señales de audio. El dispositivo de captura (ADC) del sistema puede ser, en general,
-       * multicanal, y podrá muestrear N señales. Lo típico es que sea estéreo con lo cual N = 2 canales (L y R).
+       * Captura y analiza N señales de audio provenientes de un dispositivo de captura de audio con interfaz ALSA . El
+       * dispositivo de captura (ADC) del sistema puede ser, en general, multicanal. Lo más típico es que sea estéreo
+       * con lo cual N = 2 canales (L y R) pero este software está preparado para trabajar con N canales incluyendo por
+       * supuesto N = 1.
        *
-       * Para la obtención de las muestras usa la API Linux ALSA.
+       * Realiza las siguientes medidas:
+       *
+       * - Estimación de la densidad espectral de potencia por el método del periodograma (FFT al cuadrado).
+       * - Localización de la frecuencia cuya potencia es máxima en el espectro.
+       *
+       * Con las medidas anteriores podemos usar este componente, por ejemplo, para ver el espectro de la señal o para
+       * detectar la presencia o no de tonos enterrados en ruido y estimar su frecuencia y su amplitud.
+       *
+       *
+       * TODO: Añadir más medidas como la distorsión armónica total (THD) incluyendo o no el ruido de fondo en toda la
+       * banda, la relación señal a ruido (SNR), etc...
        *
        */
       class ThdAnalyzer {
@@ -26,9 +38,9 @@ namespace thd_analyzer {
              *
              * @param capture_device El dispositivo ALSA de captura de muestras de audio, por ejemplo "default" es el
              * dispositivo predeterminado del sistema y casi siempre representa la entrada de linea o micrófono, otros
-             * dispositivos son por ejemplo "hw:0,0", "hw:1,0", "plughw:0,0", etc... Todo esto depende del sistema en
+             * dispositivos son por ejemplo "hw:0,0", "hw:1,0", "plughw:0,0", etc. Todo esto depende del sistema en
              * concreto, pruebe a ejecutar el programa "arecord -l" para ver una lista de dispositivos. Importante:
-             * ajuste el volumen de grabación y active el capturador con alsamixer primero.
+             * ajuste el volumen de grabación y active el capturador (unmute) con el programa alsamixer primero.
              */
             ThdAnalyzer(const char* capture_device);
 
@@ -40,37 +52,41 @@ namespace thd_analyzer {
              */
             ~ThdAnalyzer();
 
+
             /**
              * Inicialización.
              *
-             * Pone en marcha el hilo de procesado de señal, que comenzará detenido. Para ponerlo en marcha y hay que
-             * llamar a Start().
+             * Configura el dispositivo ADC de captura y pone en marcha el hilo de procesado de señal.
              */
             int Init();
 
 
+
             /**
-             * Da comienzo a la captura de muestras de audio y al análisis de las señales. Mientras el análisis esté en
+             * TODO: Da comienzo a la captura de muestras de audio y al análisis de las señales. Mientras el análisis esté en
              * marcha podremos llamar a las funciones Frequency() etc para obtener las medidas.
              */
-            int Start();
-
+            //int Start();
 
             /**
-             * Detiene la captura de muestras de audio y el análisis. Las medidas no cambiarán, se mantendrán en el
+             * TODO: Detiene la captura de muestras de audio y el análisis. Las medidas no cambiarán, se mantendrán en el
              * último estado antes de llamar a Stop().
              */
-            int Stop();
+            //int Stop();
 
-
-            //
+            /**
+             * TODO: Vacía los búferes de muestras, contadores, etc en genral todo el estado interno.
+             */
             //int Reset();
 
 
             /**
-             * Frecuencia cuyo coeficiente en la transformada tiene módulo máximo, expresado en Hz.
+             * Devuelve el índice de frecuencia, es decir, el punto de la FFT cuyo módulo es el máximo absoluto. Los
+             * índices empiezan en 0, van desde 0 hasta (BlockSize() - 1). Para obtener la frecuencia analógica que
+             * corresponde a este punto llame a AnalogFrequency().
              *
-             * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
+             * @param channel Número de canal. En un dispositivo de captura estéreo el 0 es el canal izquierdo y el 1 es
+             * el canal derecho.
              */
             int FindPeak(int channel);
 
@@ -80,32 +96,55 @@ namespace thd_analyzer {
              *
              * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
              */
-            double RmsAmplitude(int channel);
+            //double RmsAmplitude(int channel);
             
             
             /**
-             * PSD.
+             * Densidad espectral de potencia correspondiente a la frecuencia |frequency_index|. 
+             * La unidad es vatios / (radian / muestra)
              *
-             * @param frequency_bin Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
+             * @param channel El número de canal, es un dispositivo estéreo 0 es el izquierdo y 1 el derecho.
+             * @param frequency_index Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
+             *
              */
             double PowerSpectralDensity(int channel, int frequency_index);
 
+
             /**
+             * Lo mismo que PowerSpectralDensity() pero expresado en decibelios, es decir, aplicando
+             * 10*log10(x). Expresado en dB la cantidad siempre será negativa, el máximo valor posible es 0 dB.
              *
+             * @param frequency_bin Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
+             */
+            double PowerSpectralDensityDecibels(int channel, int frequency_index);
+
+
+
+            /**
+             * Devuelve la frecuencia analógica en hertzios (Hz) correpondiente al índice |frequency_index|. La
+             * frecuencia analógica es |frequency_index| * (Fs / N) donde Fs es la frecuencia de muestreo y N es el
+             * número de puntos de la FFT, que es fijo. TODO: Hacerlo configurable.
+             *
+             * @return La frecuencia analógica en hertzios (Hz) correpondiente al índice
+             * suministrado.
              */
             double AnalogFrequency(int frequency_index);
 
 
+
             /**
+             * Número de bloques procesados desde que el hilo interno de procesado se puso en marcha mediante Init()
              */
             int BlockCount() const;
 
             /**
+             * Número de puntos de la FFT, que será siempre una potencia de 2. TODO: Hacerlo configurable, actualmente
+             * está fijado en 4096, para la siguiente versión del componente.
              */
             int BlockSize() const;
 
-      private:
 
+      private:
 
             // Parametros comunes a todos los canales
 
@@ -122,6 +161,7 @@ namespace thd_analyzer {
             // Numero de bloques procesados
             int block_count_;
 
+
             /**
              * Canal de entrada (L o R)
              */
@@ -130,7 +170,7 @@ namespace thd_analyzer {
                   // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
                   double* data;
 
-                  // |block_size_| muestras de la densidad espectral de potencia estimada
+                  // |block_size_| muestras de la densidad espectral de potencia estimada |X(k)|^2
                   double* pwsd;
                   
                   double rms;
@@ -141,10 +181,8 @@ namespace thd_analyzer {
 
             Channel* channel_;
 
-            // Búferes temporales
-            double* im;
-            double* abs2;
-
+            double* Xre_;
+            double* Xim_;
 
             // Hilo
             pthread_t thread_;
