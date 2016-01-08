@@ -34,6 +34,14 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
             n = n * 2;
       }
 
+
+      memset(&thread_, 0, sizeof(pthread_t));
+
+      pthread_attr_init(&thread_attr_);
+      pthread_attr_setdetachstate(&thread_attr_, PTHREAD_CREATE_JOINABLE);
+      //pthread_attr_getstacksize(&thread_attr_, &stacksize);
+
+
       // Formato nativo de las muestras, tal cual vienen el propio hardware.
       // 16 bits LE = 4 bytes por frame, un frame es una muestra del canal L y otra del canal R
       buf_data_ = new int16_t[kChannelCount * block_size_];
@@ -58,13 +66,18 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ThdAnalyzer::~ThdAnalyzer() {
-      exit_thread_ = true;
+      
+      //assert(initialized_ == true);
 
-      //TODO: pthread_join()      
-      //usleep(100);
+      exit_thread_ = true;
+      //pthread_cancel(thread_);  
+      pthread_join(thread_, NULL);
+      
+      if (capture_handle_ != NULL) {
+            snd_pcm_close(capture_handle_);
+      }
 
       int c;
-
       for (c = 0; c < kChannelCount; c++) {
             delete[] channel_[c].data;
             delete[] channel_[c].pwsd;
@@ -171,7 +184,7 @@ void* ThdAnalyzer::ThreadFunc() {
 
       // Inicialización del dispositivo de captura de audio: Parámetros HW
       // ---------------------------------------------------------------------------------------------------------------      
-      snd_pcm_hw_params_t* hw_params;
+      snd_pcm_hw_params_t* hw_params = NULL;
 
 	//printf("Opening %s...\n", device_.c_str());
 
@@ -216,7 +229,8 @@ void* ThdAnalyzer::ThreadFunc() {
             return NULL;
       }
 	
-      snd_pcm_hw_params_free (hw_params);
+      snd_pcm_hw_params_free(hw_params);
+      hw_params = NULL;
 
       // Inicialización del dispositivo de captura de audio:
       // Parámetros SW
@@ -224,8 +238,7 @@ void* ThdAnalyzer::ThreadFunc() {
       // tell ALSA to wake us up whenever block_size_ or more frames
       // of playback data can be delivered. Also, tell ALSA that we'll
       // start the device ourselves.
-      snd_pcm_sw_params_t *sw_params;
-
+      snd_pcm_sw_params_t* sw_params = NULL;
       if ((err = snd_pcm_sw_params_malloc(&sw_params)) < 0) {
             fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror (err));
             return NULL;
@@ -246,6 +259,12 @@ void* ThdAnalyzer::ThreadFunc() {
             fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(err));
             return NULL;
       }
+
+      // ???
+      snd_pcm_sw_params_free(sw_params);
+      sw_params = NULL;
+
+
 
       // ---------------------------------------------------------------------------------------------------------------
       if ((err = snd_pcm_prepare(capture_handle_)) < 0) {
@@ -303,6 +322,8 @@ void* ThdAnalyzer::ThreadFunc() {
       }
 
       snd_pcm_close(capture_handle_);
+      capture_handle_ = NULL;
+
       return NULL;
 }
 
