@@ -1,6 +1,6 @@
 // Hi Emacs, this is -*- mode: c++; tab-width: 6; indent-tabs-mode: nil; c-basic-offset: 6 -*-
 /**
- * Analizador de distorsión armónica total de una señal tonal de audio.
+ * Analizador de espectro de señales de audio.
  *
  * Copyright(c) 2015 SEPSA
  * Javier Valcarce, <javier.valcarce@sepsa.es>
@@ -36,7 +36,9 @@ void Usage();
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char** argv) {
 
-      // hw0,2
+
+      //hw:1,0
+      //hw:1,2
       device_ = "default";
 
       while (1) {
@@ -74,26 +76,44 @@ int main(int argc, char** argv) {
 
       int fbin;
       
+      const thd_analyzer::SpectrumMask* mask;
+      int count = 0;
+
       printf("Estimating maximum power frequency:\n");
       while (1) {
 
             for (int c = 0; c < 2; c++) {
 
-                  fbin = analyzer->FindPeak(c);            
-                  printf("CHANNEL %d B%06d - Frequency %07.1f Hz, Power %014.8f dB\n", 
+                  fbin = analyzer->FindPeak(c);
+                  mask = analyzer->Mask(c);
+
+                  printf("CH%d B%06d - Peak (%6.0f Hz, %9.5f dB), SNRI(900,1100) %9.5f dB, TTE: %6d, LTF: %6.0f Hz LTV: %9.5f\n",
                          c,
                          analyzer->BlockCount(), 
-                         analyzer->AnalogFrequency(fbin), 
-                         analyzer->PowerSpectralDensity(c, fbin));
+                         analyzer->AnalogFrequency(fbin),                          
+                         analyzer->PowerSpectralDensityDecibels(c, fbin),
+                         analyzer->SNRI(c, 900, 1100),
+                         mask->error_count,
+                         mask->last_trespassing_frequency,
+                         mask->last_trespassing_value
+                        );
             }
 
-            // Retrocedo dos líneas
+            count++;            
+            usleep(100000); // 0,1 segundos
+
+            // Retrocedo dos líneas y vuelvo a imprimir
             printf("\r");
             printf("\x1b[A");
             printf("\x1b[A");
 
-            //fflush(stdout);
-            usleep(500000); // 0,1 segundos
+            if ((count % 8 * 10) == 0) {
+                  printf("PLOT\n");
+                  analyzer->GnuplotFileDump("dump.plot");
+                  usleep(250000); // 0,25 segundos
+            }
+
+
       }
 
       return 0;

@@ -5,8 +5,25 @@
 #include <stdint.h>
 #include <string>
 #include <alsa/asoundlib.h>
+#include <pthread.h>
+
 
 namespace thd_analyzer {
+
+
+      class SpectrumMask {
+      public:
+            SpectrumMask(int size);
+            ~SpectrumMask();
+
+            int size;
+            double* value;
+            int error_count;
+
+            double last_trespassing_frequency;
+            double last_trespassing_value;
+
+      };
 
 
       /**
@@ -32,7 +49,7 @@ namespace thd_analyzer {
        */
       class ThdAnalyzer {
       public:
-     
+
             /**
              * Constructor.
              *
@@ -81,6 +98,50 @@ namespace thd_analyzer {
 
 
             /**
+             * Número de puntos de la FFT, que será siempre una potencia de 2. 
+             *
+             * TODO: Hacerlo configurable, actualmente está fijado en 4096 puntos.
+             */
+            int DftSize() const;
+
+            /**
+             * Frecuencia de muestreo en hercios (Hz).
+             *
+             * TODO: Hacerlo configurable, actualmente está fijado en 192000 Hz.
+             */
+            int SamplingFrequency() const;
+
+            /**
+             * Resolución analógica que tiene este analizador, expresado en Hz.
+             *
+             * No es posible distinguir dos tonos que estén separados menos que esta cantidad, que es simplemente
+             * SamplingFrequency() / DftSize()
+             */
+            double AnalogResolution() const;
+
+            /**
+             * Devuelve la frecuencia analógica en hercios (Hz) correpondiente al índice |frequency_index|. 
+             * 
+             * La frecuencia analógica es |frequency_index| * (Fs / N) donde Fs es la frecuencia de muestreo y N es el
+             * número de puntos de la FFT, que se obtiene con DftSize()
+             *
+             * @return La frecuencia analógica en hertzios (Hz) correpondiente al índice suministrado.
+             */
+            double AnalogFrequency(int frequency_index);
+
+            // 
+            const SpectrumMask* Mask(int channel) const { return channel_[channel].mask; }
+
+            /**
+             * Escribe en disco un fichero de texto listo para visualizar el spectro con gnuplot/octave/matlab.
+             * Tiene DftSize() filas y N+1 columnas, siendo N el número de canales. La primera columna es la frecuencia 
+             * analógica.
+             */
+            int GnuplotFileDump(std::string file_name);
+
+            // MEDIDAS
+
+            /**
              * Devuelve el índice de frecuencia, es decir, el punto de la FFT cuyo módulo es el máximo absoluto. Los
              * índices empiezan en 0, van desde 0 hasta (BlockSize() - 1). Para obtener la frecuencia analógica que
              * corresponde a este punto llame a AnalogFrequency().
@@ -97,8 +158,17 @@ namespace thd_analyzer {
              * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
              */
             //double RmsAmplitude(int channel);
-            
-            
+                       
+
+            /**
+             * Estimación de la relación señal a ruido más interferente (SNRI).
+             *
+             * Esta estimación es bastante simplista, considera que la banda de frecuencia en la que está la señal (y
+             * solo está ella, ahí no hay ruido ni inteferencia) es (f1, f2) Hz, lo cual no tiene porqué ser cierto.
+             */
+            double SNRI(int channel, double f1, double f2);
+ 
+
             /**
              * Densidad espectral de potencia correspondiente a la frecuencia |frequency_index|. 
              * La unidad es vatios / (radian / muestra)
@@ -109,42 +179,50 @@ namespace thd_analyzer {
              */
             double PowerSpectralDensity(int channel, int frequency_index);
 
-
             /**
              * Lo mismo que PowerSpectralDensity() pero expresado en decibelios, es decir, aplicando
              * 10*log10(x). Expresado en dB la cantidad siempre será negativa, el máximo valor posible es 0 dB.
              *
-             * @param frequency_bin Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
+             * @param frequency_index Índice de la frecuencia en la que se evaluará la densidad espectral de potencia.
              */
             double PowerSpectralDensityDecibels(int channel, int frequency_index);
-
-
-
-            /**
-             * Devuelve la frecuencia analógica en hertzios (Hz) correpondiente al índice |frequency_index|. La
-             * frecuencia analógica es |frequency_index| * (Fs / N) donde Fs es la frecuencia de muestreo y N es el
-             * número de puntos de la FFT, que es fijo. TODO: Hacerlo configurable.
-             *
-             * @return La frecuencia analógica en hertzios (Hz) correpondiente al índice
-             * suministrado.
-             */
-            double AnalogFrequency(int frequency_index);
-
-
 
             /**
              * Número de bloques procesados desde que el hilo interno de procesado se puso en marcha mediante Init()
              */
             int BlockCount() const;
 
-            /**
-             * Número de puntos de la FFT, que será siempre una potencia de 2. TODO: Hacerlo configurable, actualmente
-             * está fijado en 4096, para la siguiente versión del componente.
-             */
-            int BlockSize() const;
-
 
       private:
+
+            /**
+             * Datos brutos y calculados de uno de los canales de entrada del ADC (normalmente será un ADC estéreo y
+             * tendrá por tanto dos canales, L y R)
+             */
+            struct Channel {
+
+                  // TODO: pthread_mutex_lock/unlock 
+                  pthread_mutex_t lock;
+
+                  // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
+                  double* data;
+
+                  // |block_size_| muestras de la densidad espectral de potencia estimada |X(k)|^2
+                  double* pwsd;
+
+                  // Valor del máximo del espectro
+                  double peakv;
+
+                  // Frecuencia en la que se produce ese máximo espectral.
+                  int peakf;
+
+                  // Valor RSM (Root Mean Square) del bloque de muestras capturado
+                  //double rms;
+                  SpectrumMask* mask;
+            };
+
+            // Número de canales del dispositivo ADC, lo normal es que sea estéreo: 2 canales.
+            int channel_count_;
 
             // Parametros comunes a todos los canales
 
@@ -161,25 +239,8 @@ namespace thd_analyzer {
             // Numero de bloques procesados
             int block_count_;
 
-
-            /**
-             * Canal de entrada (L o R)
-             */
-            struct Channel {
-
-                  // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
-                  double* data;
-
-                  // |block_size_| muestras de la densidad espectral de potencia estimada |X(k)|^2
-                  double* pwsd;
-                  
-                  double rms;
-                  double peakv;
-                  int peakf;
-                 
-            };
-
             Channel* channel_;
+            
 
             double* Xre_;
             double* Xim_;
@@ -208,7 +269,6 @@ namespace thd_analyzer {
 
             void* ThreadFunc();
 
-            int DumpToTextFile(const char* file_name, int file_index, double* x, double* y, int size);
             
             /**
              * This computes an in-place complex-to-complex FFT 

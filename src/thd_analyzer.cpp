@@ -7,24 +7,61 @@
 #include <cmath>
 #include <limits>
 #include <cassert>
+
+// Esta es la única dependecia interesante
 #include <alsa/asoundlib.h>
+#include <pthread.h>
 
 
 using namespace thd_analyzer;
 
-static const int kChannelCount = 2;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+SpectrumMask::SpectrumMask(int msize) {
+      size = msize;
+      value = new double[size];
+      int i;
+
+      // TODO: Máscara configurable.
+      for (i = 0; i < size; i++) {
+            value[i] = -7.0; // dB
+      }
+
+      for (i = 18; i < 25; i++) { // banda correspondiente a un 1 kHz (900, 1100)
+            value[i] = 0.0; // dB
+      }
+
+      error_count = 0;
+      last_trespassing_frequency = nan("");
+      last_trespassing_value = nan("");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+SpectrumMask::~SpectrumMask() {
+      delete[] value;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 
       device_ = pcm_capture_device;
+      channel_count_ = 2;
+
       initialized_ = false;
       exit_thread_ = false;
       capture_handle_ = NULL;
+     
 
+      // TODO: Hacer esto configurable.
       sample_rate_ = 192000; //48000;
-      block_size_ = 4096; // 8192 TODO: Configurable.
+      block_size_ = 4096; // 8192 
       block_count_ = 0;
+
+      
+
 
       // calculo de log2(block_size_)
       block_size_log2_ = 0;
@@ -44,20 +81,23 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device) {
 
       // Formato nativo de las muestras, tal cual vienen el propio hardware.
       // 16 bits LE = 4 bytes por frame, un frame es una muestra del canal L y otra del canal R
-      buf_data_ = new int16_t[kChannelCount * block_size_];
+      buf_data_ = new int16_t[channel_count_ * block_size_];
       buf_size_ = 0;
       
-      channel_ = new Channel[kChannelCount];
+      channel_ = new Channel[channel_count_];
 
       int c;
 
-      for (c = 0; c < kChannelCount; c++) {
-            // canal L
+      for (c = 0; c < channel_count_; c++) {
+
+            pthread_mutex_init(&(channel_[c].lock), NULL);
+
             channel_[c].data = new double[block_size_];
             channel_[c].pwsd = new double[block_size_]; // es real, |X(k)|^2
             channel_[c].peakf = 0;
             channel_[c].peakv = 0.0;
-            channel_[c].rms = 0.0;
+            //channel_[c].rms = 0.0;
+            channel_[c].mask = new SpectrumMask(block_size_);
       }
 
       Xre_ = new double[block_size_];
@@ -78,16 +118,15 @@ ThdAnalyzer::~ThdAnalyzer() {
       }
 
       int c;
-      for (c = 0; c < kChannelCount; c++) {
+      for (c = 0; c < channel_count_; c++) {
             delete[] channel_[c].data;
             delete[] channel_[c].pwsd;
+            delete channel_[c].mask;
       }
 
       delete[] channel_;
-
       delete[] Xre_;
       delete[] Xim_;
-
       delete[] buf_data_;
       
 }
@@ -124,15 +163,48 @@ int ThdAnalyzer::Stop() {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int ThdAnalyzer::FindPeak(int channel) {
       assert(initialized_ == true);
-      assert(channel < kChannelCount);
+      assert(channel < channel_count_);
       return channel_[channel].peakf;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+double ThdAnalyzer::SNRI(int channel, double f1, double f2) {
+
+      // Estimación de la SNRI considerando la banda (af1, af2) = (900, 1100) Hz
+      double analog_resolution = (double) sample_rate_ / (double) block_size_; 
+      int d1 = (int) floor(f1 / analog_resolution);
+      int d2 = (int) ceil (f2 / analog_resolution);
+
+      double* psd = channel_[channel].pwsd;
+
+      double snri;
+      double acc;
+      double sig;
+      
+      sig = 0.0;
+      acc = 0.0;
+
+      int i;
+      for (i = 0; i < block_size_; i++) {
+            acc += psd[i]; // !! CONCURRENCIA !! TODO: pthread_mutex_lock/unlock
+      }
+      
+      // d1 y d2 ambos inclusive
+      for (i = d1; i < d2 + 1; i++) {
+            sig += psd[i]; // !! CONCURRENCIA !! TODO: pthread_mutex_lock/unlock
+      }
+
+      acc -= sig;
+      snri = sig / acc;
+      return 10 * log10(snri);
+      //return snri;
 }
 
 /*
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double ThdAnalyzer::RmsAmplitude(int channel) {
       assert(initialized_ == true);
-      assert(channel < kChannelCount);
+      assert(channel < channel_count_);
       return channel_[channel].rms;
 }
 */
@@ -140,16 +212,20 @@ double ThdAnalyzer::RmsAmplitude(int channel) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double ThdAnalyzer::PowerSpectralDensity(int channel, int frequency_index) {
       assert(initialized_ == true);
-      assert(channel < kChannelCount);
-      return channel_[channel].peakv;
+      assert(channel < channel_count_);
+      assert(frequency_index < block_size_);
+      
+      return channel_[channel].pwsd[frequency_index];
+      //return channel_[channel].peakv;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double ThdAnalyzer::PowerSpectralDensityDecibels(int channel, int frequency_index) {
       assert(initialized_ == true);
-      assert(channel < kChannelCount);
+      assert(channel < channel_count_);
+      assert(frequency_index < block_size_);
 
-      return 10.0 * log10(channel_[channel].peakv);
+      return 10.0 * log10(channel_[channel].pwsd[frequency_index]);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -165,11 +241,22 @@ int ThdAnalyzer::BlockCount() const {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int ThdAnalyzer::BlockSize() const {
+int ThdAnalyzer::DftSize() const {
       assert(initialized_ == true);
       return block_size_;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+int ThdAnalyzer::SamplingFrequency() const {
+      assert(initialized_ == true);
+      return sample_rate_;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+double ThdAnalyzer::AnalogResolution() const {
+      assert(initialized_ == true);
+      return (double) sample_rate_ / (double) block_size_;
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -213,6 +300,14 @@ void* ThdAnalyzer::ThreadFunc() {
             fprintf(stderr, "cannot set sample format (%s)\n", snd_strerror(err));
             return NULL;
       }
+
+/*
+      // Restrict a configuration space to contain only real hardware rates
+      if ((err = snd_pcm_hw_params_set_rate_resample(capture_handle_, hw_params, 0)) < 0) {
+            fprintf(stderr, "cannot disable software resampler (%s)\n", snd_strerror(err));
+            return NULL;
+      }
+*/
 
       if ((err = snd_pcm_hw_params_set_rate_near(capture_handle_, hw_params, (unsigned int*) &sample_rate_, NULL)) < 0) {
             fprintf(stderr, "cannot set sample rate (%s)\n", snd_strerror(err));
@@ -295,23 +390,29 @@ void* ThdAnalyzer::ThreadFunc() {
             int i;
 
             // Conversión de formato: de int16_t a coma flotante 
+            pthread_mutex_lock(&(channel_[0].lock));
+            pthread_mutex_lock(&(channel_[1].lock));
+
             for (i = 0; i < block_size_; i++) {
-                  channel_[0].data[i] = ((double) buf_data_[2 * i + 0]) / 32678.0;
-                  channel_[1].data[i] = ((double) buf_data_[2 * i + 1]) / 32678.0;
+                  channel_[0].data[i] = ((double) buf_data_[2 * i + 0]) / 32768.0; // 20160121 JVG: Estaba mal, es 32768
+                  channel_[1].data[i] = ((double) buf_data_[2 * i + 1]) / 32768.0;
+
+                  //assert(channel_[0].data[i] <= 1.0);
+                  //assert(channel_[1].data[i] <= 1.0);
             }
-
-
-            /*
+            
             // Señales sintéticas para depuración
-            // Debug ---------------------------------------------------------------
+            /*
             static int z = 0;
             for (i = 0; i < block_size_; i++) {
-                  channel_[0].data[i] = 1.00 * cos(4687.5 * M_PI / (sample_rate_ / 2) * z);
-                  channel_[1].data[i] = 0.1  * cos(4687.5 * M_PI / (sample_rate_ / 2) * z);
-                  z++;
+                  // Frecuencia en Hz
+                  channel_[0].data[i] = 1.00 * cos(20000 * M_PI / (sample_rate_ / 2) * z);
+                  channel_[1].data[i] = 1.00 * cos(80000 * M_PI / (sample_rate_ / 2) * z);
+                  z++;                  
             }
-            // Debug ---------------------------------------------------------------
             */
+            pthread_mutex_unlock(&(channel_[0].lock));
+            pthread_mutex_unlock(&(channel_[1].lock));
 
             Process();
             block_count_++;
@@ -334,9 +435,7 @@ int ThdAnalyzer::Process() {
       int c;
       int n;
       int k;
-
       int N;
-
       double* re;
       double* im;
 
@@ -346,14 +445,19 @@ int ThdAnalyzer::Process() {
       // Dos FFT reales de N puntos por el precio de una FFT compleja de N puntos. Ver:
       // Proakis, Manolakis, "Tratamiento digital de señales", 3º ediciion, ISBN 84-8322-000-8, capítulo 6, pág 485.
       //
-      for (c = 0; c < kChannelCount; c += 2) {
+      for (c = 0; c < channel_count_; c += 2) {
             
-            N = block_size_;
             re = channel_[c + 0].data;
             im = channel_[c + 1].data;
 
+            pthread_mutex_lock(&(channel_[c + 0].lock));
+            pthread_mutex_lock(&(channel_[c + 1].lock));
+
+            // Esta función calcula los coeficientes "in-place", sobreescribiendo los valores previous de señal.
             FFT(1, block_size_log2_, re, im);
-            
+
+            N = block_size_;
+ 
             for (k = 0; k < N; k++) {
                   
                   // Señal c + 0
@@ -361,40 +465,36 @@ int ThdAnalyzer::Process() {
                   Xim_[k] =  ( im[k] - im[N-k] );
                   channel_[c + 0].pwsd[k] = Xre_[k]*Xre_[k] + Xim_[k]*Xim_[k]; // SQRT
 
+                  //channel_[c + 0].pwsd[k] = channel_[c + 0].pwsd[k] / block_size_ / block_size_;
+ 
                   // Señal c + 1
                   Xre_[k] =  ( im[k] + im[N-k] );
                   Xim_[k] =  ( re[N-k] - re[k] ); 
                   channel_[c + 1].pwsd[k] = Xre_[k]*Xre_[k] + Xim_[k]*Xim_[k]; // SQRT
+
+                  //channel_[c + 1].pwsd[k] = channel_[c + 1].pwsd[k] / block_size_ / block_size_;
             }
+
+            pthread_mutex_unlock(&(channel_[c + 0].lock));
+            pthread_mutex_unlock(&(channel_[c + 1].lock));
       }
 
-      // Nota: channel_[c + 1].pwsd[k] es la amplitud al cuadrado de la frecuencia k-ésima de la señal. Por ejemplo: un
-      // tono 0.5*cos(wn) lo detecta con amplitud 0.25, hay que aplicar la raiz cuadrada si queremos obtener la
-      // amplitud, esto se hace así para reducir carga computacional (no hay que llamar a sqrt() en cada muestra).
-
+      // pwsd[k] es la amplitud al cuadrado de la frecuencia k-ésima de la señal. Por ejemplo: un tono 0.5*cos(wn) lo
+      // detecta con amplitud 0.25. Hay que aplicar la raiz cuadrada si queremos obtener la amplitud, esto se hace así
+      // para reducir carga computacional (no hay que llamar a sqrt() en cada muestra).
 
       int max_index;
       double max_value;
 
       // Proceso canal por canal
       // Búque del máximo absoluto (peakv) y la posición en la que está (peakf)
-      for (c = 0; c < kChannelCount; c++) {
- 
-            // Conversión a dB - Desactivada
-            /*
-            for (k = 0; k < block_size_ / 2; k++) {                  
-                  channel_[c].pwsd[k] = 10.0 * log10(channel_[c].pwsd[k]);
-                  assert(errno != EDOM);
-                  assert(errno != ERANGE);
-            }
-            */
+      for (c = 0; c < channel_count_; c++) {
             
-            // Búsqueda del máximo absoluto
+            // *** PROCESADO: Búsqueda del máximo absoluto
             max_value = 1e-16;  // Umbral mínimo de detección 
             max_index = -1;     // -1 significa que ninguna de las frecuencias tiene una potencia que supere el umbral prefijado.
 
-
-            // modulo al cuadrado, solo frecuencias positivas
+            // block_size_ / 2 = solo frecuencias positivas
             for (k = 0; k < block_size_ / 2; k++) {
                   if (channel_[c].pwsd[k] > max_value) {
                         max_value = channel_[c].pwsd[k];
@@ -402,20 +502,68 @@ int ThdAnalyzer::Process() {
                   }
             }
             
-
             channel_[c].peakv = max_value; 
             channel_[c].peakf = max_index;
+            
+            // *** PROCESADO: Comprobación de la máscara
+            channel_[c].mask->error_count = 0;
+            channel_[c].mask->last_trespassing_frequency = nan("");
+            channel_[c].mask->last_trespassing_value = nan("");
+
+            // block_size_ / 2 = solo frecuencias positivas
+            for (k = 0; k < block_size_ / 2; k++) {
+
+                  double db = 10.0 * log10(channel_[c].pwsd[k]);
+
+                  if (db > channel_[c].mask->value[k]) {
+                        channel_[c].mask->error_count++;
+                        channel_[c].mask->last_trespassing_frequency = AnalogFrequency(k);
+                        channel_[c].mask->last_trespassing_value = db;
+                  }
+            }
       }
 
       return 0;
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int ThdAnalyzer::DumpToTextFile(const char* file_name, int file_index, double* x, double* y, int size) {
-      // Impresión por pantalla de la DFT^2 en dB (10log10)
+int ThdAnalyzer::GnuplotFileDump(std::string file_name) {
+      FILE* fd;
+
+      fd = fopen(file_name.c_str(), "w");
+      if (fd == NULL) {
+            return 1;
+      }
+      
+      int i;
+      int j;
+
+      // LOCK
+      for (j = 0; j < channel_count_; j++) {
+            pthread_mutex_lock(&(channel_[j].lock));
+      }
+
+      for (i = 0; i < block_size_ / 2; i++) {
+
+            // Columna 1 - Frecuencia analógica
+            fprintf(fd, "%09.2f ", AnalogFrequency(i));
+
+            for (j = 0; j < channel_count_; j++) {
+                  fprintf(fd, "%010.8f ", channel_[j].pwsd[i]);
+            }
+
+            fprintf(fd, "\n");
+      }
+
+      // UNLOCK
+      for (j = 0; j < channel_count_; j++) {
+            pthread_mutex_unlock(&(channel_[j].lock));
+      }
+      
+      fclose(fd);
       return 0;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void ThdAnalyzer::FFT(short int dir, long m,double *x,double *y) {
