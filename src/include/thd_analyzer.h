@@ -11,40 +11,65 @@
 namespace thd_analyzer {
 
 
+      class ThdAnalyzer;
+
+
+      // Máscara espectral fija. TODO: Hacerla configurable.
       class SpectrumMask {
       public:
-            SpectrumMask(int size);
+            
+            SpectrumMask(int sampling_rate, int fft_size);
+
             ~SpectrumMask();
 
-            int size;
-            double* value;
-            int error_count;
+            // Número de frecuencias en el espectro actual que TRASPASAN la máscara
+            int    error_count;
 
+            // Primera frecuencia que traspasa la máscara
+            double first_trespassing_frequency;
+
+            // Valor de dicha frecuencia
+            double first_trespassing_value;
+
+            // Última frecuencia analógica (la de valor más alto) que traspasa la máscara
             double last_trespassing_frequency;
+            
+            // Valor de dicha frecuencia
             double last_trespassing_value;
 
+      private:
+            
+            friend class ThdAnalyzer;   
+
+            // La máscar no es totalmente rígida, se puede desplazar arriba y abajo en el eje de amplitud.
+            double vertical_offset;
+
+            // Valores de la máscara, es una array de [size] elementos
+            double* value;
+            int size;
+
+            int fs;
       };
 
 
       /**
-       * ThdAnalyzer.
+       * Analizador de espectro en tiempo real para señales de audio.
        *
-       * Captura y analiza N señales de audio provenientes de un dispositivo de captura de audio con interfaz ALSA . El
-       * dispositivo de captura (ADC) del sistema puede ser, en general, multicanal. Lo más típico es que sea estéreo
-       * con lo cual N = 2 canales (L y R) pero este software está preparado para trabajar con N canales incluyendo por
-       * supuesto N = 1.
+       * Analiza N señales de audio provenientes de un dispositivo ADC multicanal con interfaz Linux ALSA . El ADc del
+       * sistema puede ser, como digo, multicanal de N canales. Lo más típico es que sea estéreo con lo cual N = 2 (L y
+       * R) pero este software está preparado para trabajar en general con N canales incluyendo por supuesto audio
+       * monoaural (N = 1).
        *
        * Realiza las siguientes medidas:
        *
        * - Estimación de la densidad espectral de potencia por el método del periodograma (FFT al cuadrado).
        * - Localización de la frecuencia cuya potencia es máxima en el espectro.
+       * - Relación señal a ruido más interferencias (SNRI )
+       + - comprueba si un espectro se ajusta a una máscara dada o no, y contabiliza el número de frecuencias que están 
+       *   rebasando la máscara.
        *
        * Con las medidas anteriores podemos usar este componente, por ejemplo, para ver el espectro de la señal o para
        * detectar la presencia o no de tonos enterrados en ruido y estimar su frecuencia y su amplitud.
-       *
-       *
-       * TODO: Añadir más medidas como la distorsión armónica total (THD) incluyendo o no el ruido de fondo en toda la
-       * banda, la relación señal a ruido (SNR), etc...
        *
        */
       class ThdAnalyzer {
@@ -52,20 +77,30 @@ namespace thd_analyzer {
 
             /**
              * Constructor.
+             * 
              *
-             * @param capture_device El dispositivo ALSA de captura de muestras de audio, por ejemplo "default" es el
+             * @param capture_device El dispositivo ALSA que captura de muestras de audio, por ejemplo "default" es el
              * dispositivo predeterminado del sistema y casi siempre representa la entrada de linea o micrófono, otros
              * dispositivos son por ejemplo "hw:0,0", "hw:1,0", "plughw:0,0", etc. Todo esto depende del sistema en
-             * concreto, pruebe a ejecutar el programa "arecord -l" para ver una lista de dispositivos. Importante:
-             * ajuste el volumen de grabación y active el capturador (unmute) con el programa alsamixer primero.
+             * concreto, pruebe a ejecutar el programa "arecord -l" para ver una lista de dispositivos. Muy importante:
+             * ajuste primero el volumen de grabación y active el capturador (unmute) con el programa alsamixer.
+             *
+             * @param sampling_rate Frecuencia de muestreo (Fs) del ADC, en Hz. Cuidado: No siempre funciona lo de
+             * ajustar la frecuencia de muestreo, en mi PC, no sé aun el porqué, independientemente de lo que le pongas
+             * aquí la Fs es siempre 192000 Hz. Valores típicos son: 44100 Hz, 48000 Hz, 96000 Hz y 192000 Hz. Por otro
+             * lado, la resolución de las muestras es fijo de 16 bits con signo (Little Endian INT16).
+             *
+             * @param log2_block_size Logaritmo en base 2 del número de puntos que se calculan en elespectro. Si aquí se
+             * pasa por ejemplo 10 significa que se van a calcular 2^10 = 1024 puntos del espectro. Cuantos más puntos
+             * más resolución espectral tendremos pero también más carga computacional. Valores típicos son 10, 11 o 12.
+             * 
              */
-            ThdAnalyzer(const char* capture_device);
+            ThdAnalyzer(const char* capture_device, int sampling_rate, int log2_block_size);
 
 
             /**
              * Destructor. 
-             *
-             * Detiene el hilo de procesado de señal y libera toda la memoria que se pidió en el constructor.
+             *             
              */
             ~ThdAnalyzer();
 
@@ -85,6 +120,8 @@ namespace thd_analyzer {
              */
             //int Start();
 
+            // bool IsRunning();
+
             /**
              * TODO: Detiene la captura de muestras de audio y el análisis. Las medidas no cambiarán, se mantendrán en el
              * último estado antes de llamar a Stop().
@@ -98,21 +135,17 @@ namespace thd_analyzer {
 
 
             /**
-             * Número de puntos de la FFT, que será siempre una potencia de 2. 
-             *
-             * TODO: Hacerlo configurable, actualmente está fijado en 4096 puntos.
-             */
-            int DftSize() const;
-
-            /**
-             * Frecuencia de muestreo en hercios (Hz).
-             *
-             * TODO: Hacerlo configurable, actualmente está fijado en 192000 Hz.
+             * Frecuencia de muestreo en hercios (Hz) que está usando el analizador.
              */
             int SamplingFrequency() const;
 
             /**
-             * Resolución analógica que tiene este analizador, expresado en Hz.
+             * Número de puntos de la DFT, que será siempre una potencia de 2. 
+             */
+            int DftSize() const;
+            
+            /**
+             * Resolución en frcuencia que tiene este analizador, expresado en Hz.
              *
              * No es posible distinguir dos tonos que estén separados menos que esta cantidad, que es simplemente
              * SamplingFrequency() / DftSize()
@@ -129,17 +162,21 @@ namespace thd_analyzer {
              */
             double AnalogFrequency(int frequency_index);
 
-            // 
-            const SpectrumMask* Mask(int channel) const { return channel_[channel].mask; }
-
             /**
-             * Escribe en disco un fichero de texto listo para visualizar el spectro con gnuplot/octave/matlab.
-             * Tiene DftSize() filas y N+1 columnas, siendo N el número de canales. La primera columna es la frecuencia 
-             * analógica.
+             * Escribe en disco un fichero de texto con los puntos del espectro listo para visualizar con gnuplot,
+             * octave, matlab, etc. Tiene DftSize() filas y N+1 columnas, siendo N el número de canales. La primera
+             * columna es la frecuencia analógica y las demás los valores del espectro.
              */
             int GnuplotFileDump(std::string file_name);
 
-            // MEDIDAS
+
+            // ----- MEDIDAS -------------------------------------------------------------------------------------------
+
+            /**
+             * Devuelve la máscara espectral que se está usando y los contadores de errores asociados.
+             */
+            const SpectrumMask* Mask(int channel) const { return channel_[channel].mask; }
+
 
             /**
              * Devuelve el índice de frecuencia, es decir, el punto de la FFT cuyo módulo es el máximo absoluto. Los
@@ -150,15 +187,7 @@ namespace thd_analyzer {
              * el canal derecho.
              */
             int FindPeak(int channel);
-
-            /**
-             * Amplitud máxima del pedazo de señal, normalizada entre 0.0 y 1.0, para convertir esto en voltios hay que
-             * saber el rango dinámico de entrada del conversor A/D.
-             *
-             * @param channel Número de canal. En un dispositivo estéreo el 0 es el izquierdo y el 1 es el derecho.
-             */
-            //double RmsAmplitude(int channel);
-                       
+                      
 
             /**
              * Estimación de la relación señal a ruido más interferente (SNRI).
@@ -187,10 +216,14 @@ namespace thd_analyzer {
              */
             double PowerSpectralDensityDecibels(int channel, int frequency_index);
 
+
             /**
-             * Número de bloques procesados desde que el hilo interno de procesado se puso en marcha mediante Init()
+             * Número de bloques de DftSize() muestras procesados en cada canal desde que el hilo interno de procesado
+             * se puso en marcha mediante Init(). Sirve por ejemplo para comprobar que el hilo interno de procesado 
+             * no se ha parado y está vivo.
              */
             int BlockCount() const;
+
 
 
       private:
@@ -201,9 +234,11 @@ namespace thd_analyzer {
              */
             struct Channel {
 
-                  // TODO: pthread_mutex_lock/unlock 
+                  // pthread_mutex_lock/unlock 
                   pthread_mutex_t lock;
 
+                  // TODO: size
+                  
                   // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
                   double* data;
 
@@ -242,8 +277,7 @@ namespace thd_analyzer {
             Channel* channel_;
             
 
-            double* Xre_;
-            double* Xim_;
+           
 
             // Hilo
             pthread_t thread_;

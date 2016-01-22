@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
             }
       }
 
-      analyzer = new ThdAnalyzer(device_.c_str()); 
+      analyzer = new ThdAnalyzer(device_.c_str(), 192000, 12); 
       if (analyzer->Init() != 0) {
             printf("Error: During ALSA device initialization.\n");
             return 1;
@@ -79,21 +79,22 @@ int main(int argc, char** argv) {
       const thd_analyzer::SpectrumMask* mask;
       int count = 0;
 
-      printf("Estimating maximum power frequency:\n");
+      
       while (1) {
 
             for (int c = 0; c < 2; c++) {
 
                   fbin = analyzer->FindPeak(c);
                   mask = analyzer->Mask(c);
-
-                  printf("CH%d B%06d - Peak (%6.0f Hz, %9.5f dB), SNRI(900,1100) %9.5f dB, TTE: %6d, LTF: %6.0f Hz LTV: %9.5f\n",
+                  
+                  printf("CH%d Max=(%6.0f Hz, %9.5f dB), SNRI=%8.3f dB, TTE=%4d, F=(%6.0f Hz, %9.5f dB) L=(%6.0f Hz, %9.5f dB)\n",
                          c,
-                         analyzer->BlockCount(), 
-                         analyzer->AnalogFrequency(fbin),                          
+                         analyzer->AnalogFrequency(fbin),                
                          analyzer->PowerSpectralDensityDecibels(c, fbin),
                          analyzer->SNRI(c, 900, 1100),
                          mask->error_count,
+                         mask->first_trespassing_frequency,
+                         mask->first_trespassing_value,
                          mask->last_trespassing_frequency,
                          mask->last_trespassing_value
                         );
@@ -102,17 +103,15 @@ int main(int argc, char** argv) {
             count++;            
             usleep(100000); // 0,1 segundos
 
+            if ((count % 10 * 10) == 0) {
+                  analyzer->GnuplotFileDump("dump.plot");
+                  usleep(500000); // 0,5 segundos
+            }
+
             // Retrocedo dos líneas y vuelvo a imprimir
             printf("\r");
             printf("\x1b[A");
             printf("\x1b[A");
-
-            if ((count % 8 * 10) == 0) {
-                  printf("PLOT\n");
-                  analyzer->GnuplotFileDump("dump.plot");
-                  usleep(250000); // 0,25 segundos
-            }
-
 
       }
 
