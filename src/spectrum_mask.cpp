@@ -11,10 +11,9 @@ SpectrumMask::SpectrumMask(int sampling_rate, int fft_size) {
       size = fft_size;
       value = new double[size];
 
-      Reset(50);
+      Reset(0);
 
       error_count = 0;
-
       first_trespassing_frequency = nan("");
       first_trespassing_value = nan("");
       last_trespassing_frequency = nan("");
@@ -30,7 +29,6 @@ SpectrumMask::~SpectrumMask() {
 void SpectrumMask::SetBandAttenuation(double f1, double f2, double attenuation) {
 
       // Máscara rectangular simple
-      
       double analog_resolution = (double) fs / (double) size; 
       int d1 = (int) floor(f1 / analog_resolution);
       int d2 = (int) ceil (f2 / analog_resolution);

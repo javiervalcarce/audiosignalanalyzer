@@ -100,16 +100,25 @@ namespace thd_analyzer {
             InternalState State() const { return internal_state_; }
 
             /**
+             * Ultimo error ocurrido.
+             */
+            const std::string& ErrorDescription() const { return error_description_; }
+
+            /**
              * Da comienzo a la captura de muestras de audio y al análisis de las señales. Mientras el análisis esté en
              * marcha podremos llamar a las funciones para obtener las medidas.
-             * TODO
+             * 
+             * Esta llama es asincrona.
              */
             int Start();
+
 
             /**
              * Detiene la captura de muestras de audio y el análisis. Las medidas efectuadas no cambiarán, se mantendrán 
              * en el último estado en que estaban antes de llamar a Stop().
-             * TODO
+             * 
+             * Esta llama es asincrona, es decir, el analizador no se detendra inmediatamente sino en un instante 
+             * posterior (en menos de ~10 ms, depende del tamaño DftSize()). TODO: Escribir un Stop() sincrono.
              */
             int Stop();
 
@@ -157,7 +166,7 @@ namespace thd_analyzer {
              */
             SpectrumMask* Mask(int channel) const { return channel_[channel].mask; }
 
-
+            int OverrunCount() const { return overrun_count_; }
             /**
              * Devuelve el índice de frecuencia, es decir, el punto de la FFT cuyo módulo es el máximo absoluto. Los
              * índices empiezan en 0, van desde 0 hasta (BlockSize() - 1). Para obtener la frecuencia analógica que
@@ -214,16 +223,22 @@ namespace thd_analyzer {
              */
             struct Channel {
 
-                  // pthread_mutex_lock/unlock 
-                  pthread_mutex_t lock;
-
-                  int size;
+                  //Channel(int dft_size);
+                  //~Channel();
                   
-                  // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
+                  // Longitud de los vectores data y time
+                  int size;
+
+                  // señal en el dominio del tiempo, muestras convertidas a coma flotante y normalizadas 
+                  // en el intevalo real [-1.0, 1.0)
+                  double* xval;
+
+                  // tmp
                   double* data;
 
-                  // |block_size_| muestras de la densidad espectral de potencia estimada |X(k)|^2
+                  // coeficientes de la DFT, modulo al cuadrado, |X(k)|^2
                   double* pwsd;
+
 
                   // Valor del máximo del espectro
                   double peakv;
@@ -232,14 +247,13 @@ namespace thd_analyzer {
                   int peakf;
 
                   // Valor RSM (Root Mean Square) del bloque de muestras capturado
-                  //double rms;
                   SpectrumMask* mask;
             };
 
             // Número de canales del dispositivo ADC, lo normal es que sea estéreo: 2 canales.
             int channel_count_;
 
-            // Parametros comunes a todos los canales
+            pthread_mutex_t channel_lock_;
 
             // Tamaño de bloque en muestras. El procesamiento de señal
             // se hace por bloques de muestras, no muestra a muestra, que seria muy ineficiente.
@@ -258,13 +272,13 @@ namespace thd_analyzer {
             
             pthread_mutex_t lock_;
             pthread_cond_t  can_continue_;  
-           
 
             // Hilo
             pthread_t thread_;
             pthread_attr_t thread_attr_;
 
             InternalState internal_state_;
+            std::string error_description_;
             bool exit_thread_;
 
             // Dispositivo ALSA de captura
@@ -276,20 +290,14 @@ namespace thd_analyzer {
             // Búfer en el se reciben las muestras en el formato en que las entrega el ADC, que normalmente será int16_t
             // las muestras podrán pertenecer a un solo canal o a varios intercalados. Si por ejemplo hay dos canales
             // (estereo) entonces las muestras estarán dispuestas de la forma L R L R L R L R L R...)
-            int16_t* buf_data_;
-            int      buf_size_;
-
+            //int16_t* buf_data_;
+            int32_t* buf_data_;
+            
             int overrun_count_;
 
             static void* ThreadFuncHelper(void* p);
-
             void* ThreadFunc();
-
             int AdcSetup();
-
-            /**
-             * Procesado de señal.
-             */
             int Process();
       };
 }

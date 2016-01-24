@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 
       //hw:1,0
       //hw:1,2
-      device_ = "default";
+      device_ = "hw:0,0";//"default";
 
       while (1) {
 
@@ -77,8 +77,8 @@ int main(int argc, char** argv) {
       // configura a 48000.  Si queremos 44100 hay que poner una
       // cantidad ligeramente inferior, por ejemplo 44099
 
-      //analyzer = new ThdAnalyzer(device_.c_str(), 44099, 12);  // 44,1 kHz, FFT-8192
-      analyzer = new ThdAnalyzer(device_.c_str(), 47999, 12);    // 48   kHz, FFT-8192
+      analyzer = new ThdAnalyzer(device_.c_str(), 44099, 12);  // 44,1 kHz, FFT-8192
+      //analyzer = new ThdAnalyzer(device_.c_str(), 47999, 12);    // 48   kHz, FFT-8192
       //analyzer = new ThdAnalyzer(device_.c_str(), 191999, 12); // 192  kHz, FFT-8192
 
       if (analyzer->Init() != 0) {
@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
             return 1;
       } 
 
-      printf("Actual sampling rate used is %d\n", analyzer->SamplingFrequency());
+      printf("Actual sampling rate is %d\n", analyzer->SamplingFrequency());
       
       analyzer->Start();
 
@@ -97,21 +97,24 @@ int main(int argc, char** argv) {
 
       for (c = 0; c < 2; c++) {
             analyzer->Mask(c)->Reset(20.0);
-            analyzer->Mask(c)->SetBandAttenuation(0040.0, 00100.0, 15.0);
-            analyzer->Mask(c)->SetBandAttenuation(0430.0, 00450.0, 00.0);
+            analyzer->Mask(c)->SetBandAttenuation(0000.0, 00100.0, 15.0);
+            analyzer->Mask(c)->SetBandAttenuation(0430.0, 00450.0, -5.0);
       }
 
       int count = 0;
-     
+      printf("\n");
+
       while (1) {
 
             for (c = 0; c < 2; c++) {
-
                   fbin = analyzer->FindPeak(c);
                   mask = analyzer->Mask(c);                  
-                  
-                  printf("CH%d Max=(%6.1f Hz, %9.5f dB), SNRI=%8.3f dB, TTE=%4d, F=(%6.0f Hz, %9.5f dB) L=(%6.0f Hz, %9.5f dB)\n",
+
+                  assert(mask != NULL);
+
+                  printf("CH%d XR=%d Max=(%6.1f Hz, %9.5f dB), SNRI=%8.3f dB, TTE=%4d, F=(%6.1f Hz, %9.5f dB) L=(%6.1f Hz, %9.5f dB)\n",
                          c,
+                         analyzer->OverrunCount(),
                          analyzer->AnalogFrequency(fbin),                
                          analyzer->PowerSpectralDensityDecibels(c, fbin),
                          analyzer->SNRI(c, 900, 1100),
@@ -120,33 +123,23 @@ int main(int argc, char** argv) {
                          mask->first_trespassing_value,
                          mask->last_trespassing_frequency,
                          mask->last_trespassing_value
-                        );
+                         );
             }
 
             count++;            
-            usleep(50000); // 0,05 segundos
-
-            /*
-            if ((count % 5 * 10) == 0) {
-
-                  if (analyzer->State() == ThdAnalyzer::kRunning) {
-                        analyzer->Stop();
-                  } else {
-                        analyzer->Start();
-                  }
-            }
-            */
-
-            if ((count % 10 * 10) == 0) {
-                  analyzer->GnuplotFileDump("dump.plot");
+            usleep(100000); // 0,05 segundos
+            
+            if ((count % 50) == 0) {
+                  analyzer->Stop();
                   usleep(500000); // 0,5 segundos
+                  analyzer->GnuplotFileDump("dump.plot");
+                  analyzer->Start();
             }
-
+            
             // Retrocedo dos líneas y vuelvo a imprimir
             printf("\r");
             printf("\x1b[A");
             printf("\x1b[A");
-
       }
 
       return 0;

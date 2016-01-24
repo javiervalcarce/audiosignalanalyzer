@@ -16,11 +16,14 @@ using namespace thd_analyzer;
 ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device, int sampling_rate, int log2_block_size) {
 
       pthread_mutex_init(&lock_, NULL);
+      pthread_mutex_init(&channel_lock_, NULL);
+
       pthread_cond_init(&can_continue_, NULL);  
 
       device_ = pcm_capture_device;
       channel_count_ = 2;
       internal_state_ = kNotInitialized;
+      error_description_ = "no error";
 
       exit_thread_ = false;
       capture_handle_ = NULL;
@@ -36,6 +39,8 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device, int sampling_rate, int 
             block_size_ *= 2;
       }
 
+      printf("block_size=%d\n", block_size_);
+
       memset(&thread_, 0, sizeof(pthread_t));
 
       pthread_attr_init(&thread_attr_);
@@ -44,22 +49,19 @@ ThdAnalyzer::ThdAnalyzer(const char* pcm_capture_device, int sampling_rate, int 
 
       // Formato nativo de las muestras, tal cual vienen el propio hardware.
       // 16 bits LE = 4 bytes por frame, un frame es una muestra del canal L y otra del canal R
-      buf_data_ = new int16_t[channel_count_ * block_size_];
-      buf_size_ = 0;
+      //buf_data_ = new int16_t[channel_count_ * block_size_];
+      buf_data_ = new int32_t[channel_count_ * block_size_];
+      
       overrun_count_ = 0;
 
       channel_ = new Channel[channel_count_]; // TODO, en el constructor.
       for (int c = 0; c < channel_count_; c++) {
-
-            pthread_mutex_init(&(channel_[c].lock), NULL);
             channel_[c].size = block_size_;
             channel_[c].data = new double[block_size_];
             channel_[c].pwsd = new double[block_size_]; // es real, |X(k)|^2
             channel_[c].peakf = 0;
             channel_[c].peakv = 0.0;
-            //channel_[c].rms = 0.0;
             channel_[c].mask = new SpectrumMask(sample_rate_, block_size_);
-            //channel_[c].mask = NULL;
       }
 
 }
@@ -95,9 +97,11 @@ int ThdAnalyzer::Init() {
 
       assert(internal_state_ == kNotInitialized);
 
+      
       if (AdcSetup() != 0) {
             return 1;
       };
+           
 
       // Creación del hilo que lee y procesa las muestras de audio.
       int r;
@@ -142,100 +146,67 @@ int ThdAnalyzer::AdcSetup() {
 
       int err;
 
-      // Inicialización del dispositivo de captura de audio: Parámetros HW
-      // ---------------------------------------------------------------------------------------------------------------      
       snd_pcm_hw_params_t* hw_params = NULL;
-
-      if ((err = snd_pcm_open(&capture_handle_, device_.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0) {
-            fprintf(stderr, "cannot open audio device %s (%s)\n", device_.c_str(), snd_strerror(err));
-            return 1;
-      }
-		   
-      if ((err = snd_pcm_hw_params_malloc(&hw_params)) < 0) {
-            fprintf(stderr, "cannot allocate hardware parameter structure (%s)\n", snd_strerror(err));
-            return 1;
-      }
-				 
-      if ((err = snd_pcm_hw_params_any(capture_handle_, hw_params)) < 0) {
-            fprintf(stderr, "cannot initialize hardware parameter structure (%s)\n", snd_strerror(err));
-            return 1;
-      }
-	
-      if ((err = snd_pcm_hw_params_set_access(capture_handle_, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-            fprintf(stderr, "cannot set access type (%s)\n", snd_strerror(err));
-            return 1;
-      }
-	
-      if ((err = snd_pcm_hw_params_set_format(capture_handle_, hw_params, SND_PCM_FORMAT_S16_LE)) < 0) {
-            fprintf(stderr, "cannot set sample format (%s)\n", snd_strerror(err));
-            return 1;
-      }
-
-
-      // Restrict a configuration space to contain only real hardware rates
-      if ((err = snd_pcm_hw_params_set_rate_resample(capture_handle_, hw_params, 0)) < 0) {
-            fprintf(stderr, "cannot disable software resampler (%s)\n", snd_strerror(err));
-            return 1;
-      }
-      
-      /*
-        int dir;
-        if ((err = snd_pcm_hw_params_set_rate_near(capture_handle_, hw_params, (unsigned int*) &sample_rate_, &dir)) < 0) {
-        fprintf(stderr, "cannot set sample rate (%s)\n", snd_strerror(err));
-        return 1;
-        }
-      */
-
-      if ((err = snd_pcm_hw_params_set_rate_min(capture_handle_, hw_params, (unsigned int*) &sample_rate_, NULL)) < 0) {
-            fprintf(stderr, "cannot set sample rate (%s)\n", snd_strerror(err));
-            return 1;
-      }
-      
-      if ((err = snd_pcm_hw_params_set_channels(capture_handle_, hw_params, 2)) < 0) {
-            fprintf(stderr, "cannot set channel count (%s)\n", snd_strerror(err));
-            return 1;
-      }
-	
-      if ((err = snd_pcm_hw_params(capture_handle_, hw_params)) < 0) {
-            fprintf(stderr, "cannot set parameters (%s)\n", snd_strerror(err));
-            return 1;
-      }
-	
-      snd_pcm_hw_params_free(hw_params);
-      hw_params = NULL;
-
-      // Inicialización del dispositivo de captura de audio: Parámetros SW
-      // ---------------------------------------------------------------------------------------------------------------
       snd_pcm_sw_params_t* sw_params = NULL;
 
+      // Inicialización del dispositivo de captura de audio: Parámetros HW
+      // ---------------------------------------------------------------------------------------------------------------      
+      if ((err = snd_pcm_open(&capture_handle_, device_.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0) {
+            goto fatal_error;
+      }
+      if ((err = snd_pcm_hw_params_malloc(&hw_params)) < 0) {
+            goto fatal_error;      
+      }
+      if ((err = snd_pcm_hw_params_any(capture_handle_, hw_params)) < 0) {
+            goto fatal_error;
+      }
+      if ((err = snd_pcm_hw_params_set_access(capture_handle_, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
+            goto fatal_error;
+      }
+      if ((err = snd_pcm_hw_params_set_format(capture_handle_, hw_params, SND_PCM_FORMAT_S32_LE)) < 0) {
+            goto fatal_error;
+      }
+      // Restrict a configuration space to contain only real hardware rates
+      if ((err = snd_pcm_hw_params_set_rate_resample(capture_handle_, hw_params, 0)) < 0) {
+            goto fatal_error;
+      }
+      if ((err = snd_pcm_hw_params_set_rate_min(capture_handle_, hw_params, (unsigned int*) &sample_rate_, NULL)) < 0) {
+            goto fatal_error;
+      }
+      if ((err = snd_pcm_hw_params_set_channels(capture_handle_, hw_params, 2)) < 0) {
+            goto fatal_error;
+      }
+      if ((err = snd_pcm_hw_params(capture_handle_, hw_params)) < 0) {
+            goto fatal_error;
+      }
+	
+      // Inicialización del dispositivo de captura de audio: Parámetros SW
+      // ---------------------------------------------------------------------------------------------------------------
       if ((err = snd_pcm_sw_params_malloc(&sw_params)) < 0) {
-            fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror (err));
-            return 1;
+            goto fatal_error;
       }
       if ((err = snd_pcm_sw_params_current(capture_handle_, sw_params)) < 0) {
-            fprintf(stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(err));
-            return 1;
+            goto fatal_error;
       }
       if ((err = snd_pcm_sw_params_set_avail_min(capture_handle_, sw_params, block_size_)) < 0) {
-            fprintf(stderr, "cannot set minimum available count (%s)\n", snd_strerror(err));
-            return 1;
+            goto fatal_error;
       }
       if ((err = snd_pcm_sw_params_set_start_threshold(capture_handle_, sw_params, 0U)) < 0) {
-            fprintf(stderr, "cannot set start mode (%s)\n", snd_strerror(err));
-            return 1;
+            goto fatal_error;
       }
       if ((err = snd_pcm_sw_params(capture_handle_, sw_params)) < 0) {
-            fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(err));
-            return 1;
+            goto fatal_error;
       }
 
+      snd_pcm_hw_params_free(hw_params);
       snd_pcm_sw_params_free(sw_params);
+      hw_params = NULL;
       sw_params = NULL;
-
-
-      
-
       return 0;
+
+ fatal_error:
+      error_description_ = snd_strerror(err);
+      return 1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -253,7 +224,6 @@ double ThdAnalyzer::SNRI(int channel, double f1, double f2) {
       int d1 = (int) floor(f1 / analog_resolution);
       int d2 = (int) ceil (f2 / analog_resolution);
 
-      double* psd = channel_[channel].pwsd;
 
       double snri;
       double acc;
@@ -262,8 +232,13 @@ double ThdAnalyzer::SNRI(int channel, double f1, double f2) {
       sig = 0.0;
       acc = 0.0;
 
+      pthread_mutex_lock(&channel_lock_);
+
+      double* psd = channel_[channel].pwsd;
+      assert(psd != NULL);
+
       int i;
-      for (i = 0; i < block_size_; i++) {
+      for (i = 0; i < channel_[channel].size; i++) {
             acc += psd[i]; // !! CONCURRENCIA !! TODO: pthread_mutex_lock/unlock
       }
       
@@ -271,11 +246,14 @@ double ThdAnalyzer::SNRI(int channel, double f1, double f2) {
       for (i = d1; i < d2 + 1; i++) {
             sig += psd[i]; // !! CONCURRENCIA !! TODO: pthread_mutex_lock/unlock
       }
+      
+      pthread_mutex_unlock(&channel_lock_);
 
       acc -= sig;
       snri = sig / acc;
-      return 10 * log10(snri);
-      //return snri;
+
+      double db = 10.0 * log10(snri);
+      return db;
 }
 
 /*
@@ -292,9 +270,14 @@ double ThdAnalyzer::PowerSpectralDensity(int channel, int frequency_index) {
       assert(internal_state_ != kNotInitialized);
       assert(channel < channel_count_);
       assert(frequency_index < block_size_);
-      
-      return channel_[channel].pwsd[frequency_index];
-      //return channel_[channel].peakv;
+
+      double ps;
+
+      pthread_mutex_lock(&channel_lock_);      
+      ps = channel_[channel].pwsd[frequency_index];
+      pthread_mutex_unlock(&channel_lock_);
+
+      return ps;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -303,7 +286,13 @@ double ThdAnalyzer::PowerSpectralDensityDecibels(int channel, int frequency_inde
       assert(channel < channel_count_);
       assert(frequency_index < block_size_);
 
-      return 10.0 * log10(channel_[channel].pwsd[frequency_index]);
+      double db;
+
+      pthread_mutex_lock(&channel_lock_);
+      db = 10.0 * log10(channel_[channel].pwsd[frequency_index]);
+      pthread_mutex_unlock(&channel_lock_);
+
+      return db;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -344,7 +333,6 @@ void* ThdAnalyzer::ThreadFuncHelper(void* p) {
 }
 
 void* ThdAnalyzer::ThreadFunc() {
-      
       /*
       if (AdcSetup() != 0) {
             return NULL;
@@ -352,7 +340,7 @@ void* ThdAnalyzer::ThreadFunc() {
       */
       int err;
       if ((err = snd_pcm_prepare(capture_handle_)) < 0) {
-            fprintf(stderr, "cannot prepare audio interface for use (%s)\n", snd_strerror(err));
+            error_description_ = snd_strerror(err);
             goto fatal_error;
       }
 
@@ -361,13 +349,15 @@ void* ThdAnalyzer::ThreadFunc() {
             // Quedo a la espera de que la aplicación principal me permita continuar
             pthread_mutex_lock(&lock_);                  
             while (internal_state_ != kRunning) {
+                  //snd_pcm_drop(capture_handle_);
                   pthread_cond_wait(&can_continue_, &lock_);
             }
             pthread_mutex_unlock(&lock_);
 
             int r;
             int frames = block_size_;
-            int16_t* b = buf_data_;
+            //int16_t* b = buf_data_;
+            int32_t* b = buf_data_;
 
             do {
                   // Bloqueante
@@ -376,7 +366,7 @@ void* ThdAnalyzer::ThreadFunc() {
                         // OVERRUN
                         overrun_count_++;
                         
-                        r = snd_pcm_recover(capture_handle_, r, 0);
+                        r = snd_pcm_recover(capture_handle_, r, 1); //1 = silent
                         if (r < 0) {
                               goto fatal_error;
                         }
@@ -391,21 +381,22 @@ void* ThdAnalyzer::ThreadFunc() {
 
             int i;
 
-            // Conversión de formato: de int16_t a coma flotante 
-            pthread_mutex_lock(&(channel_[0].lock));
-            pthread_mutex_lock(&(channel_[1].lock));
-
+            // Conversión de formato y a coma flotante y normalización de las muestras en el intervalo 
+            // semiabierto [-1.0, 1.0)
             for (i = 0; i < block_size_; i++) {
-                  // Normalización de las muestras en el intervalo semiabierto [-1.0, 1.0)
-                  channel_[0].data[i] = ((double) buf_data_[2 * i + 0]) / 32768.0; 
-                  channel_[1].data[i] = ((double) buf_data_[2 * i + 1]) / 32768.0;
-/*
-                  assert(channel_[0].data[i] <   1.0);
-                  assert(channel_[0].data[i] >= -1.0);
-                  assert(channel_[1].data[i] <   1.0);
-                  assert(channel_[1].data[i] >= -1.0);
-*/
+
+                  // 16 bits con signo
+                  //channel_[0].data[i] = ((double) buf_data_[2 * i + 0]) / 32768.0;
+                  //channel_[1].data[i] = ((double) buf_data_[2 * i + 1]) / 32768.0;
+
+                  // 32 bits con signo
+                  channel_[0].data[i] = ((double) buf_data_[2 * i + 0]) / 2147483648.0;
+                  channel_[1].data[i] = ((double) buf_data_[2 * i + 1]) / 2147483648.0;
                   
+                  assert(channel_[0].data[i] < 1.0);
+                  assert(channel_[0].data[i] >= -1.0);
+                  assert(channel_[1].data[i] < 1.0);
+                  assert(channel_[1].data[i] >= -1.0);
             }
             
             // Señales sintéticas para depuración
@@ -418,8 +409,6 @@ void* ThdAnalyzer::ThreadFunc() {
                   z++;                  
             }
             */
-            pthread_mutex_unlock(&(channel_[0].lock));
-            pthread_mutex_unlock(&(channel_[1].lock));
 
             Process();
             block_count_++;
@@ -465,10 +454,9 @@ int ThdAnalyzer::Process() {
       // Dos FFT reales de N puntos por el precio de una FFT compleja de N puntos. Ver:
       // Proakis, Manolakis, "Tratamiento digital de señales", 3º ediciion, ISBN 84-8322-000-8, capítulo 6, pág 485.
       //
+
+
       for (c = 0; c < channel_count_; c += 2) {
-      
-            pthread_mutex_lock(&(channel_[c + 0].lock));
-            pthread_mutex_lock(&(channel_[c + 1].lock));
 
             re = channel_[c + 0].data;
             im = channel_[c + 1].data;
@@ -476,8 +464,9 @@ int ThdAnalyzer::Process() {
             // Esta función calcula los coeficientes "in-place", sobreescribiendo los valores previos de señal.
             thd_analyzer::FFT(1, block_size_log2_, re, im);
 
+      pthread_mutex_lock(&channel_lock_);
+
             for (k = 0; k < N; k++) {
-                  
                   // Señal c + 0
                   Xre =  ( re[k] + re[N-k] ) / fftnorm;
                   Xim =  ( im[k] - im[N-k] ) / fftnorm;
@@ -490,13 +479,13 @@ int ThdAnalyzer::Process() {
                   Xim =  ( re[N-k] - re[k] ) / fftnorm;
                   channel_[c + 1].pwsd[k] = Xre*Xre + Xim*Xim; // NO SQRT
                   //channel_[c + 1].pwsd[k] = sqrt(Xre*Xre + Xim*Xim); // NO SQRT
-
                   //assert(channel_[c + 0].pwsd[k] <= 1.000001);
             }
 
-            pthread_mutex_unlock(&(channel_[c + 0].lock));
-            pthread_mutex_unlock(&(channel_[c + 1].lock));
+            pthread_mutex_unlock(&channel_lock_);
+
       }
+
 
       // pwsd[k] es la amplitud al cuadrado de la frecuencia k-ésima de la señal. Por ejemplo: un tono 0.5*cos(wn) lo
       // detecta con amplitud 0.25. Hay que aplicar la raiz cuadrada si queremos obtener la amplitud, esto se hace así
@@ -527,8 +516,6 @@ int ThdAnalyzer::Process() {
             // *** PROCESADO: Comprobación de la máscara
             if (channel_[c].mask != NULL) {
 
-                  //pthread_mutex_lock(&(channel_[c + 0].lock));
-
                   bool first = true;
                   SpectrumMask* m = channel_[c].mask;
                   
@@ -558,7 +545,6 @@ int ThdAnalyzer::Process() {
                         }
                   }
 
-                  //pthread_mutex_unlock(&(channel_[c + 0].lock));
             }
 
       }
@@ -570,7 +556,6 @@ int ThdAnalyzer::Process() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int ThdAnalyzer::GnuplotFileDump(std::string file_name) {
       FILE* fd;
-
       fd = fopen(file_name.c_str(), "w");
       if (fd == NULL) {
             return 1;
@@ -580,26 +565,17 @@ int ThdAnalyzer::GnuplotFileDump(std::string file_name) {
       int j;
 
       // LOCK
-      for (j = 0; j < channel_count_; j++) {
-            pthread_mutex_lock(&(channel_[j].lock));
-      }
-
+      pthread_mutex_lock(&channel_lock_);
       for (i = 0; i < block_size_ / 2; i++) {
-
             // Columna 1 - Frecuencia analógica
             fprintf(fd, "%09.2f ", AnalogFrequency(i));
-
             for (j = 0; j < channel_count_; j++) {
                   fprintf(fd, "%010.8f ", channel_[j].pwsd[i]);
             }
-
             fprintf(fd, "\n");
       }
-
       // UNLOCK
-      for (j = 0; j < channel_count_; j++) {
-            pthread_mutex_unlock(&(channel_[j].lock));
-      }
+      pthread_mutex_unlock(&channel_lock_);
       
       fclose(fd);
       return 0;
