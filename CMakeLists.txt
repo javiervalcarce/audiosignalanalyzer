@@ -20,7 +20,7 @@ set (LIBTHDANALYZER_VERSION_MINOR 1)
 set (LIBTHDANALYZER_VERSION_MICRO 0)
 set (LIBTHDANALYZER_VERSION_STRING ${LIBTHDANALYZER_VERSION_MAJOR}.${LIBTHDANALYZER_VERSION_MINOR}.${LIBTHDANALYZER_VERSION_MICRO})
 
-set (libthdanalyzer_SRCS src/thd_analyzer.cpp src/waveform_generator.cpp)
+set (libthdanalyzer_SRCS src/spectrum_mask.cpp src/fft.cpp src/thd_analyzer.cpp src/waveform_generator.cpp)
 set (test_thd_analyzer_SRCS src/test_thd_analyzer.cpp)
 set (test_waveform_generator_SRCS src/test_waveform_generator.cpp)
 
@@ -30,7 +30,7 @@ set (CMAKE_VERBOSE_MAKEFILE on)
 include_directories (src/include)
 
 # opciones de compilación (CFLAGS)
-add_definitions ("-Wall -g -D_FILE_OFFSET_BITS=64")
+add_definitions ("-Wall -g")
 
 add_library(thdanalyzer SHARED ${libthdanalyzer_SRCS})
 set_target_properties(thdanalyzer PROPERTIES VERSION ${LIBTHDANALYZER_VERSION_STRING})

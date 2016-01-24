@@ -14,7 +14,7 @@ using namespace thd_analyzer;
 
 // tabla de opciones para getopt_long
 struct option long_options[] = {
-      { "device",    required_argument, 0, 'a' },
+      { "device",    required_argument, 0, 'd' },
       { "frequency", required_argument, 0, 'f' },
       { "sweep",     no_argument,       0, 's' },
       { "help",      no_argument,       0, 'h' },   
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
             return 1;
       } 
 
-      printf("Playing %d Hz tone for 30 seconds...\n", frequency);
+      printf("Playing a %d Hz tone on %s for 30 seconds...\n", frequency, device_.c_str());
       obj->SetFrequency(frequency);
 
       int count = 30;

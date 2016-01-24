@@ -10,12 +10,26 @@
 namespace thd_analyzer {
 
       /**
-       * Análisis de un tono puro. Estima la frecuencia central, su potencia y la de sus armónicos y con todo ello
-       * calcula la distorsión harmónica total (THD - Total Harmonic Distortion).
+       * Generador de funciones.
        *
        */
       class WaveformGenerator {
       public:
+            
+            enum InternalState {
+                  kStateNotInitialized,
+                  kStateRunning,
+                  kStateRunningUnderrun,
+                  kStateStopped,
+                  kStateStoppedError,
+                  kStateCrashed
+            };
+
+            enum Waveform {
+                  kWaveformSine,
+                  kWaveformSawTooth,
+                  kWaveformSquare
+            };
 
             /**
              * Constructor.
@@ -34,24 +48,48 @@ namespace thd_analyzer {
              */
             int Init();
 
-            /**
-             */
-            int Start();
 
             /**
+             * Devuelve el estado interno en el que se encuetra.
+             */
+            InternalState State();
+
+            /**
+             *
+             */
+            int Play();
+
+            /**
+             * 
+             */
+            int Pause();
+
+            /**
+             *
              */
             int Stop();
 
+
             /**
-             * Frecuencia cuyo coeficiente en la transformada tiene módulo máximo, expresado en Hz.
+             * Frecuencia maxima que este generador es capaz de sintetizar.
+             */
+            double MaximunFrequency();
+
+
+            /**
+             */
+            void SetWaveType(Waveform type);
+
+            /**
+             * Frecuencia fundamental (inverso del periodo) de la forma de onda de salida.
              */
             void SetFrequency(double frequency);
 
             /**
-             * Amplitud máxima del pedazo de señal, normalizada entre 0.0 y 1.0, para convertir esto en voltios hay que saber
-             * el rango dinámico de entrada del conversor A/D.
+             * Amplitud máxima de la forma de onda, un numero entre 0.0 y 1.0
              */
             void SetAmplitude(double amplitude);
+
 
       private:
 

@@ -7,10 +7,52 @@
 #include <alsa/asoundlib.h>
 #include <pthread.h>
 
-#include "spectrum_mask.h"
-
 
 namespace thd_analyzer {
+
+
+      class ThdAnalyzer;
+
+
+      // Máscara espectral fija. 
+      class SpectrumMask {
+      public:
+            
+            SpectrumMask(int sampling_rate, int fft_size);
+
+            ~SpectrumMask();
+
+
+
+            // Número de frecuencias en el espectro actual que TRASPASAN la máscara
+            int    error_count;
+
+            // Primera frecuencia que traspasa la máscara
+            double first_trespassing_frequency;
+
+            // Valor de dicha frecuencia
+            double first_trespassing_value;
+
+            // Última frecuencia analógica (la de valor más alto) que traspasa la máscara
+            double last_trespassing_frequency;
+            
+            // Valor de dicha frecuencia
+            double last_trespassing_value;
+
+      private:
+            
+            friend class ThdAnalyzer;   
+
+            // La máscar no es totalmente rígida, se puede desplazar arriba y abajo en el eje de amplitud.
+            double vertical_offset;
+
+            // Valores de la máscara, es una array de [size] elementos
+            double* value;
+            int size;
+
+            int fs;
+      };
+
 
       /**
        * Analizador de espectro en tiempo real para señales de audio.
@@ -34,27 +76,6 @@ namespace thd_analyzer {
        */
       class ThdAnalyzer {
       public:
-
-
-            /**
-             * Estado interno del analizador de espectro.
-             */
-            enum InternalState {
-
-                  // Aun no se ha llamado a Init(), hasta que no llame a Init() no podra ponerlo en marcha con Start().
-                  kNotInitialized,
-
-                  // Parado. Puede ponerlo en marcha con Start().
-                  kStopped,
-
-                  // En marcha. Puede pararlo con Stop().
-                  kRunning,
-
-                  // Error fatal, el analizador esta parado, el hilo ha terminado, destruya el objeto (con delete) y 
-                  // vuelva a instanciarlo.
-                  kCrashed
-            };
-
 
             /**
              * Constructor.
@@ -94,24 +115,25 @@ namespace thd_analyzer {
             int Init();
 
 
-            /**
-             * Estado interno del analizador de espectro.
-             */
-            InternalState State() const { return internal_state_; }
 
             /**
-             * Da comienzo a la captura de muestras de audio y al análisis de las señales. Mientras el análisis esté en
-             * marcha podremos llamar a las funciones para obtener las medidas.
-             * TODO
+             * TODO: Da comienzo a la captura de muestras de audio y al análisis de las señales. Mientras el análisis esté en
+             * marcha podremos llamar a las funciones Frequency() etc para obtener las medidas.
              */
-            int Start();
+            //int Start();
+
+            // bool IsRunning();
 
             /**
-             * Detiene la captura de muestras de audio y el análisis. Las medidas efectuadas no cambiarán, se mantendrán 
-             * en el último estado en que estaban antes de llamar a Stop().
-             * TODO
+             * TODO: Detiene la captura de muestras de audio y el análisis. Las medidas no cambiarán, se mantendrán en el
+             * último estado antes de llamar a Stop().
              */
-            int Stop();
+            //int Stop();
+
+            /**
+             * TODO: Vacía los búferes de muestras, contadores, etc en genral todo el estado interno.
+             */
+            //int Reset();
 
 
             /**
@@ -125,7 +147,7 @@ namespace thd_analyzer {
             int DftSize() const;
             
             /**
-             * Resolución en frecuencia que tiene este analizador, expresado en Hz.
+             * Resolución en frcuencia que tiene este analizador, expresado en Hz.
              *
              * No es posible distinguir dos tonos que estén separados menos que esta cantidad, que es simplemente
              * SamplingFrequency() / DftSize()
@@ -155,7 +177,7 @@ namespace thd_analyzer {
             /**
              * Devuelve la máscara espectral que se está usando y los contadores de errores asociados.
              */
-            SpectrumMask* Mask(int channel) const { return channel_[channel].mask; }
+            const SpectrumMask* Mask(int channel) const { return channel_[channel].mask; }
 
 
             /**
@@ -217,7 +239,7 @@ namespace thd_analyzer {
                   // pthread_mutex_lock/unlock 
                   pthread_mutex_t lock;
 
-                  int size;
+                  // TODO: size
                   
                   // |block_size_| muestras convertidas a coma flotante y normalizadas en el intevalo real [-1.0, 1.0)
                   double* data;
@@ -256,15 +278,15 @@ namespace thd_analyzer {
 
             Channel* channel_;
             
-            pthread_mutex_t lock_;
-            pthread_cond_t  can_continue_;  
+
            
 
             // Hilo
             pthread_t thread_;
             pthread_attr_t thread_attr_;
 
-            InternalState internal_state_;
+            // Indica si el objeto se ha inicializado mediante Init()
+            bool initialized_;
             bool exit_thread_;
 
             // Dispositivo ALSA de captura
@@ -279,19 +301,26 @@ namespace thd_analyzer {
             int16_t* buf_data_;
             int      buf_size_;
 
-            int overrun_count_;
-
             static void* ThreadFuncHelper(void* p);
 
             void* ThreadFunc();
 
-            int AdcSetup();
+            
+            /**
+             * This computes an in-place complex-to-complex FFT 
+             * x and y are the real and imaginary arrays of 2^m points.
+             * dir =  1 gives forward transform
+             * dir = -1 gives reverse transform 
+             */
+            void FFT(short int dir, long m, double* x, double* y);
 
             /**
-             * Procesado de señal.
+             * Process
              */
             int Process();
+      
       };
+
 }
 
 #endif // THDANALYZER_THD_ANALYZER_H_

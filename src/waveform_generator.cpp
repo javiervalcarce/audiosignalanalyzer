@@ -20,7 +20,7 @@ WaveformGenerator::WaveformGenerator(const char* playback_pcm_device) {
 
       pthread_attr_init(&thread_attr_);
 
-      sample_rate_ = 192000; //44100;
+      sample_rate_ = 192000; //48000; //192000; //44100;
       block_size_  = 1024;
       buf_data_    = new int16_t[2 * block_size_];
       frequency_   = 440;
@@ -47,12 +47,18 @@ int WaveformGenerator::Init() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int WaveformGenerator::Start() {
+int WaveformGenerator::Play() {
       run_ = true;
       // Ejemplo
       return 0;
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+WaveformGenerator::InternalState WaveformGenerator::State() {
+      // TODO
+      return kStateRunning;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int WaveformGenerator::Stop() {
@@ -113,12 +119,12 @@ void* WaveformGenerator::ThreadFunc() {
             return NULL;
       }
       
-      
+      printf("FS=%d\n", sample_rate_);
+
       if ((err = snd_pcm_hw_params_set_rate_near (playback_handle_, hw_params, (unsigned int*) &sample_rate_, NULL)) < 0) {
             fprintf (stderr, "cannot set sample rate (%s)\n", snd_strerror(err));
             return NULL;
       }
-
 
       printf("FS=%d\n", sample_rate_);
       
@@ -132,8 +138,9 @@ void* WaveformGenerator::ThreadFunc() {
             return NULL;
       }
       
-      snd_pcm_hw_params_free(hw_params);
       
+      snd_pcm_hw_params_free(hw_params);
+      hw_params = NULL;
       /* tell ALSA to wake us up whenever block_size_ or more frames of playback data can be delivered. Also, tell
                ALSA that we'll start the device ourselves.
       */
@@ -163,7 +170,10 @@ void* WaveformGenerator::ThreadFunc() {
             return NULL;
       }
 
+      snd_pcm_sw_params_free(sw_params);
+      sw_params = NULL;
 
+      // ---------------------------------------------------------------------------------------------------------------
       // The interface will interrupt the kernel every 4096 frames, and ALSA will wake up this program very soon after
       // that.
       if ((err = snd_pcm_prepare(playback_handle_)) < 0) {
@@ -176,14 +186,14 @@ void* WaveformGenerator::ThreadFunc() {
             // wait till the interface is ready for data, or 1 second has elapsed.            
             if ((err = snd_pcm_wait (playback_handle_, 1000)) < 0) {
                   fprintf(stderr, "poll failed (%s)\n", strerror (errno));
-                  break;
+                  //break;
             }           
             
             // find out how much space is available for playback data
             if ((frames_to_deliver = snd_pcm_avail_update (playback_handle_)) < 0) {
                   if (frames_to_deliver == -EPIPE) {
-                        fprintf(stderr, "an xrun occured\n");
-                        break;
+                        fprintf(stderr, "xrun\n");
+                        //break; No es un error grave
                   } else {
                         fprintf(stderr, "unknown ALSA avail update return value (%ld)\n", frames_to_deliver);
                         break;
@@ -191,10 +201,8 @@ void* WaveformGenerator::ThreadFunc() {
             }
             
             frames_to_deliver = frames_to_deliver > block_size_ ? block_size_ : frames_to_deliver;
-            if (SendSamples(frames_to_deliver) != frames_to_deliver) {
-                  fprintf (stderr, "playback callback failed\n");
-                  break;
-            }
+            SendSamples(frames_to_deliver);
+
       }
 
       snd_pcm_close(playback_handle_);
@@ -226,6 +234,7 @@ int WaveformGenerator::SendSamples(snd_pcm_sframes_t nframes) {
       
       // Envio las muestras (intercaladas L R L R L R...) al convertidor D/A
       if ((err = snd_pcm_writei(playback_handle_, buf_data_, nframes)) < 0) {
+            snd_pcm_prepare(playback_handle_);
             fprintf(stderr, "write failed (%s)\n", snd_strerror(err));
       }
       

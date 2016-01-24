@@ -66,28 +66,51 @@ int main(int argc, char** argv) {
             }
       }
 
-      analyzer = new ThdAnalyzer(device_.c_str(), 192000, 12); 
+
+      printf("Using device %s\n", device_.c_str());
+      
+
+      // Curioso: en mi PC, son sistema de audio IDT 92HD81, al usar
+      // la llamada snd_pcm_hw_params_set_rate_min() si pongo la Fs
+      // exacta que admite el hardware me selecciona la Fs
+      // inmediatamente superior, por ejemplo, si pongo 44100 se
+      // configura a 48000.  Si queremos 44100 hay que poner una
+      // cantidad ligeramente inferior, por ejemplo 44099
+
+      //analyzer = new ThdAnalyzer(device_.c_str(), 44099, 12);  // 44,1 kHz, FFT-8192
+      analyzer = new ThdAnalyzer(device_.c_str(), 47999, 12);    // 48   kHz, FFT-8192
+      //analyzer = new ThdAnalyzer(device_.c_str(), 191999, 12); // 192  kHz, FFT-8192
+
       if (analyzer->Init() != 0) {
             printf("Error: During ALSA device initialization.\n");
             return 1;
       } 
 
-      //analyzer->Start();
+      printf("Actual sampling rate used is %d\n", analyzer->SamplingFrequency());
+      
+      analyzer->Start();
 
       int fbin;
       
       const thd_analyzer::SpectrumMask* mask;
-      int count = 0;
+      int c;
 
-      
+      for (c = 0; c < 2; c++) {
+            analyzer->Mask(c)->Reset(20.0);
+            analyzer->Mask(c)->SetBandAttenuation(0040.0, 00100.0, 15.0);
+            analyzer->Mask(c)->SetBandAttenuation(0430.0, 00450.0, 00.0);
+      }
+
+      int count = 0;
+     
       while (1) {
 
-            for (int c = 0; c < 2; c++) {
+            for (c = 0; c < 2; c++) {
 
                   fbin = analyzer->FindPeak(c);
-                  mask = analyzer->Mask(c);
+                  mask = analyzer->Mask(c);                  
                   
-                  printf("CH%d Max=(%6.0f Hz, %9.5f dB), SNRI=%8.3f dB, TTE=%4d, F=(%6.0f Hz, %9.5f dB) L=(%6.0f Hz, %9.5f dB)\n",
+                  printf("CH%d Max=(%6.1f Hz, %9.5f dB), SNRI=%8.3f dB, TTE=%4d, F=(%6.0f Hz, %9.5f dB) L=(%6.0f Hz, %9.5f dB)\n",
                          c,
                          analyzer->AnalogFrequency(fbin),                
                          analyzer->PowerSpectralDensityDecibels(c, fbin),
@@ -101,7 +124,18 @@ int main(int argc, char** argv) {
             }
 
             count++;            
-            usleep(100000); // 0,1 segundos
+            usleep(50000); // 0,05 segundos
+
+            /*
+            if ((count % 5 * 10) == 0) {
+
+                  if (analyzer->State() == ThdAnalyzer::kRunning) {
+                        analyzer->Stop();
+                  } else {
+                        analyzer->Start();
+                  }
+            }
+            */
 
             if ((count % 10 * 10) == 0) {
                   analyzer->GnuplotFileDump("dump.plot");

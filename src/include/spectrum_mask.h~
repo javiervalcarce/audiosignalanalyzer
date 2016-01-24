@@ -1,0 +1,54 @@
+// Hi Emacs, this is -*- mode: c++; tab-width: 6; indent-tabs-mode: nil; c-basic-offset: 6 -*-
+#ifndef THDANALYZER_SPECTRUM_MASK_H_
+#define THDANALYZER_SPECTRUM_MASK_H_
+
+#include <stdint.h>
+#include <string>
+
+namespace thd_analyzer {
+
+      // Máscara espectral fija. TODO: Hacerla configurable.
+      class SpectrumMask {
+      public:
+            
+            SpectrumMask(int sampling_rate, int fft_size);
+
+            ~SpectrumMask();
+
+            // Número de frecuencias en el espectro actual que TRASPASAN la máscara
+            int    error_count;
+
+            // Primera frecuencia que traspasa la máscara
+            double first_trespassing_frequency;
+
+            // Valor de dicha frecuencia
+            double first_trespassing_value;
+
+            // Última frecuencia analógica (la de valor más alto) que traspasa la máscara
+            double last_trespassing_frequency;
+            
+            // Valor de dicha frecuencia
+            double last_trespassing_value;
+
+      private:
+
+            class ThdAnalyzer;            
+            friend class ThdAnalyzer;   
+
+            // La máscar no es totalmente rígida, se puede desplazar arriba y abajo en el eje de amplitud.
+            double vertical_offset;
+
+            // Valores de la máscara, es una array de [size] elementos
+            double* value;
+            int size;
+
+            int fs;
+      };
+
+}
+
+#endif // THDANALYZER_SPECTRUM_MASK_H_
+
+
+
+
