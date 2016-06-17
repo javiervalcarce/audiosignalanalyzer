@@ -20,7 +20,7 @@ set (LIBTHDANALYZER_VERSION_MINOR 1)
 set (LIBTHDANALYZER_VERSION_MICRO 0)
 set (LIBTHDANALYZER_VERSION_STRING ${LIBTHDANALYZER_VERSION_MAJOR}.${LIBTHDANALYZER_VERSION_MINOR}.${LIBTHDANALYZER_VERSION_MICRO})
 
-set (libthdanalyzer_SRCS src/spectrum_mask.cpp src/fft.cpp src/thd_analyzer.cpp src/waveform_generator.cpp)
+set (libthdanalyzer_SRCS src/spectrum_mask.cpp src/fft.cpp src/thd_analyzer.cpp src/waveform_generator.cpp src/stopwatch.cpp)
 set (test_thd_analyzer_SRCS src/test_thd_analyzer.cpp)
 set (test_waveform_generator_SRCS src/test_waveform_generator.cpp)
 

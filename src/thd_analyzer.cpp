@@ -410,6 +410,7 @@ void* ThdAnalyzer::ThreadFunc() {
             }
             */
 
+            
             Process();
             block_count_++;
 

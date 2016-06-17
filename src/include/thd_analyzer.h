@@ -302,7 +302,7 @@ namespace thd_analyzer {
       };
 }
 
-#endif // THDANALYZER_THD_ANALYZER_H_
+#endif  // THDANALYZER_THD_ANALYZER_H_
 
 
 
