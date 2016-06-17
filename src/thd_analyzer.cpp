@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include "thd_analyzer.h"
 #include "fft.h"
+#include "stopwatch.h"
+
 
 using namespace thd_analyzer;
 
@@ -204,7 +206,7 @@ int ThdAnalyzer::AdcSetup() {
       sw_params = NULL;
       return 0;
 
- fatal_error:
+fatal_error:
       error_description_ = snd_strerror(err);
       return 1;
 }
@@ -259,9 +261,9 @@ double ThdAnalyzer::SNRI(int channel, double f1, double f2) {
 /*
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double ThdAnalyzer::RmsAmplitude(int channel) {
-      assert(internal_state_ != kNotInitialized);
-      assert(channel < channel_count_);
-      return channel_[channel].rms;
+assert(internal_state_ != kNotInitialized);
+assert(channel < channel_count_);
+return channel_[channel].rms;
 }
 */
 
@@ -333,16 +335,23 @@ void* ThdAnalyzer::ThreadFuncHelper(void* p) {
 }
 
 void* ThdAnalyzer::ThreadFunc() {
+
+      Stopwatch watch;
+      uint64_t t0,t1,t2;
+
       /*
-      if (AdcSetup() != 0) {
-            return NULL;
-      };
+        if (AdcSetup() != 0) {
+        return NULL;
+        };
       */
       int err;
       if ((err = snd_pcm_prepare(capture_handle_)) < 0) {
             error_description_ = snd_strerror(err);
             goto fatal_error;
       }
+
+
+      watch.Start();
 
       while (1) {
 
@@ -359,6 +368,7 @@ void* ThdAnalyzer::ThreadFunc() {
             //int16_t* b = buf_data_;
             int32_t* b = buf_data_;
 
+            watch.Reset();
             do {
                   // Bloqueante
                   r = snd_pcm_readi(capture_handle_, b, frames);
@@ -380,7 +390,11 @@ void* ThdAnalyzer::ThreadFunc() {
             } while (r >= 1 && frames > 0);
 
             int i;
+            t0 = watch.ElapsedMicroseconds();
 
+
+
+            watch.Reset();
             // Conversión de formato y a coma flotante y normalización de las muestras en el intervalo 
             // semiabierto [-1.0, 1.0)
             for (i = 0; i < block_size_; i++) {
@@ -398,21 +412,28 @@ void* ThdAnalyzer::ThreadFunc() {
                   assert(channel_[1].data[i] < 1.0);
                   assert(channel_[1].data[i] >= -1.0);
             }
-            
+            t1 = watch.ElapsedMicroseconds();
+
             // Señales sintéticas para depuración
             /*
-            static int z = 0;
-            for (i = 0; i < block_size_; i++) {
-                  // Frecuencia en Hz
-                  channel_[0].data[i] = 0.01 * cos(1000 * M_PI / (sample_rate_ / 2) * z);
-                  channel_[1].data[i] = 0.95 * sin(2000 * M_PI / (sample_rate_ / 2) * z);
-                  z++;                  
-            }
+              static int z = 0;
+              for (i = 0; i < block_size_; i++) {
+              // Frecuencia en Hz
+              channel_[0].data[i] = 0.01 * cos(1000 * M_PI / (sample_rate_ / 2) * z);
+              channel_[1].data[i] = 0.95 * sin(2000 * M_PI / (sample_rate_ / 2) * z);
+              z++;                  
+              }
             */
 
-            
+            watch.Reset();           
             Process();
             block_count_++;
+
+            t2 = watch.ElapsedMicroseconds();
+            if (block_count_ % 4 == 0) {
+                  printf("TP: %llu %llu %llu us\n", t0, t1, t2);
+            }
+
 
             if (exit_thread_ == true) {
                   break;
@@ -424,7 +445,7 @@ void* ThdAnalyzer::ThreadFunc() {
       capture_handle_ = NULL;
       return NULL;
 
- fatal_error:
+fatal_error:
       internal_state_ = kCrashed;
       snd_pcm_close(capture_handle_);
       capture_handle_ = NULL;
@@ -465,7 +486,7 @@ int ThdAnalyzer::Process() {
             // Esta función calcula los coeficientes "in-place", sobreescribiendo los valores previos de señal.
             thd_analyzer::FFT(1, block_size_log2_, re, im);
 
-      pthread_mutex_lock(&channel_lock_);
+            pthread_mutex_lock(&channel_lock_);
 
             for (k = 0; k < N; k++) {
                   // Señal c + 0

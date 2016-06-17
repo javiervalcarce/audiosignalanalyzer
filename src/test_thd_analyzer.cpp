@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
                   mask = analyzer->Mask(c);                  
 
                   assert(mask != NULL);
-
+/*
                   printf("CH%d XR=%d Max=(%6.1f Hz, %9.5f dB), SNRI=%8.3f dB, TTE=%4d, F=(%6.1f Hz, %9.5f dB) L=(%6.1f Hz, %9.5f dB)\n",
                          c,
                          analyzer->OverrunCount(),
@@ -124,6 +124,7 @@ int main(int argc, char** argv) {
                          mask->last_trespassing_frequency,
                          mask->last_trespassing_value
                          );
+*/
             }
 
             count++;            
@@ -137,9 +138,11 @@ int main(int argc, char** argv) {
             }
             
             // Retrocedo dos líneas y vuelvo a imprimir
+/*
             printf("\r");
             printf("\x1b[A");
             printf("\x1b[A");
+*/
       }
 
       return 0;

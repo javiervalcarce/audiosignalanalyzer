@@ -25,7 +25,7 @@ namespace thd_analyzer {
        * - Estimación de la densidad espectral de potencia por el método del periodograma (FFT al cuadrado).
        * - Localización de la frecuencia cuya potencia es máxima en el espectro.
        * - Relación señal a ruido más interferencias (SNRI )
-       + - comprueba si un espectro se ajusta a una máscara dada o no, y contabiliza el número de frecuencias que están 
+       * - comprueba si un espectro se ajusta a una máscara dada o no, y contabiliza el número de frecuencias que están 
        *   rebasando la máscara.
        *
        * Con las medidas anteriores podemos usar este componente, por ejemplo, para ver el espectro de la señal o para
